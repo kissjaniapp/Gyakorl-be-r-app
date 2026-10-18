@@ -12,6 +12,8 @@ label,.mu{font-size:.75rem;color:var(--mu)}
 label{display:block;margin-bottom:4px}
 input{width:100%;padding:11px 10px;border-radius:10px;border:1px solid var(--bd);background:var(--in);color:var(--tx);font-size:1.05rem}
 select{width:100%;padding:12px 10px;border-radius:10px;border:1px solid var(--bd);background:var(--in);color:var(--tx);font-size:1.05rem}
+input:focus{border-color:var(--ac)}
+.gp{border:1px solid var(--bd);border-radius:12px;padding:10px;margin-top:12px}
 input:focus{outline:none;border-color:var(--ac)}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 button{flex:1;min-width:100px;padding:13px 10px;border:0;border-radius:12px;font-size:.95rem;font-weight:700;cursor:pointer}
@@ -35,11 +37,10 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
 
 <div id="setup" class="card">
   <div class="g2">
-    <div><label>Versenyzők száma</label><div class="step"><button class="s" onclick="setN(-1)">−</button><b id="nn">4</b><button class="s" onclick="setN(1)">+</button></div></div>
+    <div><label>Futamok (csoportok) száma</label><div class="step"><button class="s" onclick="setF(-1)">−</button><b id="nf">1</b><button class="s" onclick="setF(1)">+</button></div></div>
     <div><label>Dátum</label><input type="date" id="datum"></div>
   </div>
-  <label style="margin-top:14px">Versenyzők neve (indulási sorrendben)</label>
-  <div id="names"></div>
+  <div id="groups"></div>
   <label style="margin-top:12px">Mód</label>
   <div class="g2"><button class="m on" id="m-both" onclick="setMode('both')">Gyakorló + Éles futam</button><button class="m" id="m-eles" onclick="setMode('eles')">Csak éles futam</button></div>
   <label style="margin-top:12px">Számolás</label>
@@ -61,49 +62,69 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
 
 <div id="done" class="hidden">
   <div class="card">
-    <div class="mu" style="font-weight:600;margin-bottom:8px">🏆 Végeredmény</div>
+    <div id="fbox" class="hidden" style="margin-bottom:10px"><label>Futam</label><select id="fsel" onchange="pickF()"></select></div>
+    <div class="mu" id="ft" style="font-weight:600;margin-bottom:8px">🏆 Végeredmény</div>
     <table><thead><tr><th>#</th><th>Név</th><th>Pont</th><th id="fti">Idő</th><th>Végered.</th></tr></thead><tbody id="fb"></tbody></table>
+    <div id="allbox" class="hidden" style="margin-top:16px"><div class="mu" style="font-weight:600;margin-bottom:8px">🏁 Összesített állás – összes futam eddig</div>
+    <table><thead id="ah"></thead><tbody id="ab"></tbody></table></div>
     <label style="margin-top:14px">Kinek az eredményét mentsük / küldjük?</label>
     <select id="who"></select>
     <div class="row"><button class="p" onclick="doSave()">📷 Mentés a telefonra</button></div>
     <div class="row hidden" id="bs"><button class="n" onclick="doSend('com.facebook.orca','Messenger')">💬 Küldés Messengerrel</button><button class="v" onclick="doSend('com.viber.voip','Viber')">📞 Küldés Viberrel</button></div>
-    <div class="row"><button class="s" onclick="back()">← Utolsó kör</button><button class="v" onclick="restart()">🆕 Új futam</button></div>
+    <div class="row"><button class="p hidden" id="bnf" onclick="nextF()">Következő futam →</button></div>
+    <div class="row"><button class="s" onclick="back()">← Utolsó kör</button><button class="v" onclick="restart()">🆕 Új verseny</button></div>
   </div>
 </div>
 
 <script>
 const GK=3,EK=9;
-let N=4,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]};
+let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]};
 const $=id=>document.getElementById(id),f2=x=>x.toFixed(2),eq=(a,b)=>Math.abs(a-b)<1e-9;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nm=i=>names[i]||`Versenyző ${i+1}`, mx=()=>ph=='gyak'?GK:EK;
 const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n};
 $('datum').valueAsDate=new Date();
 
-function drawNames(){
-  const old=[...document.querySelectorAll('.nmi')].map(e=>e.value);
-  $('names').innerHTML=Array.from({length:N},(_,i)=>`<input class="nmi" style="margin-bottom:6px" placeholder="${i+1}. versenyző neve" value="${esc(old[i]||'')}">`).join('');
-  $('nn').textContent=N;
+function drawSetup(){
+  const old=FN.map((n,f)=>[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value));
+  $('nf').textContent=FN.length;
+  $('groups').innerHTML=FN.map((n,f)=>`<div class="gp"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><b>${FN.length>1?(f+1)+'. futam':'Versenyzők'}</b><div class="step"><button class="s" onclick="setN(${f},-1)">−</button><b>${n}</b><button class="s" onclick="setN(${f},1)">+</button></div></div>`+Array.from({length:n},(_,i)=>`<input class="nmi" data-f="${f}" style="margin-bottom:6px" placeholder="${i+1}. versenyző neve" value="${esc((old[f]&&old[f][i])||'')}">`).join('')+'</div>').join('');
 }
-function setN(d){N=Math.min(30,Math.max(1,N+d));drawNames()}
+function setF(d){
+  const n=Math.min(10,Math.max(1,FN.length+d));
+  while(FN.length<n)FN.push(FN[FN.length-1]);
+  FN.length=n;drawSetup();
+}
+function setN(f,d){FN[f]=Math.min(30,Math.max(1,FN[f]+d));drawSetup()}
 function setMode(m){mode=m;$('m-both').classList.toggle('on',m=='both');$('m-eles').classList.toggle('on',m=='eles')}
 function setTime(b){useTime=b;$('t-ido').classList.toggle('on',b);$('t-pont').classList.toggle('on',!b)}
-drawNames();
+drawSetup();
 
 function show(id){['setup','run','done'].forEach(s=>$(s).classList.toggle('hidden',s!=id))}
 function start(){
-  names=[...document.querySelectorAll('.nmi')].map(e=>e.value.trim());
-  D={gyak:[],eles:[]};ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render();
+  futams=FN.map((n,f)=>({names:[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value.trim()),D:{gyak:[],eles:[]}}));
+  load(0);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render();
 }
+function load(k){fi=k;names=futams[k].names;D=futams[k].D}
+const fpre=()=>futams.length>1?`${fi+1}. futam · `:'';
 const calc=(p,i,g)=>useTime?({p,i,r:p+i,v:g?i>0:i>=0}):({p,i:0,r:p,v:true});
 
 function cum(p,c,u=99){let s=0,n=0;for(let k=0;k<=u&&k<D[p].length;k++){const e=D[p][k]&&D[p][k][c];if(e&&e.v){s+=e.r;n++}}return{s,n}}
-function tot(c){let s=0,pp=0,ii=0;D.eles.forEach(R=>{const e=R&&R[c];if(e&&e.v){s+=e.r;pp+=e.p;ii+=e.i}});return{c,s,pp,ii}}
+function tot(c,DD=D){let s=0,pp=0,ii=0;DD.eles.forEach(R=>{const e=R&&R[c];if(e&&e.v){s+=e.r;pp+=e.p;ii+=e.i}});return{c,s,pp,ii}}
+const played=F=>F.D.eles.some(R=>R&&R.some(Boolean));
+function allRows(){
+  const a=[];
+  futams.forEach((F,f)=>{if(played(F))F.names.forEach((_,c)=>{const t=tot(c,F.D);a.push({c,D:F.D,fut:f+1,name:F.names[c]||`Versenyző ${c+1}`,s:t.s,pp:t.pp,ii:t.ii})})});
+  a.sort((x,y)=>y.s-x.s||y.ii-x.ii);
+  a.forEach((x,i)=>x.pl=i&&eq(a[i-1].s,x.s)&&eq(a[i-1].ii,x.ii)?a[i-1].pl:i+1);
+  return a;
+}
+const withF=(f,fn)=>{const o=fi;load(f);try{return fn()}finally{load(o)}};
 function ranking(){const a=names.map((_,c)=>tot(c)).sort((x,y)=>y.s-x.s||y.ii-x.ii);a.forEach((x,i)=>{x.pl=i&&eq(a[i-1].s,x.s)&&eq(a[i-1].ii,x.ii)?a[i-1].pl:i+1});return a}
 
 function render(){
   const g=ph=='gyak',e=(D[ph][ri]||[])[ci],last=ci==names.length-1;
-  $('ph').textContent=`${g?'Gyakorló':'Éles'} · ${ri+1}/${mx()}. kör · ${ci+1}/${names.length}. versenyző`;
+  $('ph').textContent=`${fpre()}${g?'Gyakorló':'Éles'} · ${ri+1}/${mx()}. kör · ${ci+1}/${names.length}. versenyző`;
   $('nu').textContent=nm(ci);
   const more=ri<mx()-1||(g&&mode=='both');
   const hint=!last?`Következő: ${nm(ci+1)}`:more?`Utána új kör: ${nm(0)} indul`:'Ő az utolsó';
@@ -151,26 +172,46 @@ function go(d){
 }
 function finish(){
   show('done');
+  $('fbox').classList.toggle('hidden',futams.length<2);
+  $('fsel').innerHTML=futams.map((_,k)=>`<option value="${k}"${k==fi?' selected':''}>${k+1}. futam</option>`).join('');
+  $('ft').textContent=futams.length>1?`🏆 ${fi+1}. futam végeredménye`:'🏆 Végeredmény';
+  $('bnf').classList.toggle('hidden',fi>=futams.length-1);
   $('fti').style.display=useTime?'':'none';
   $('fb').innerHTML=ranking().map(x=>`<tr><td>${['🥇','🥈','🥉'][x.pl-1]||x.pl+'.'}</td><td>${esc(nm(x.c))}</td><td>${x.pp}</td>${useTime?`<td>${f2(x.ii)}</td>`:''}<td class="ok"><b>${f2(x.s)}</b></td></tr>`).join('');
   if(native)$('bs').classList.remove('hidden');
-  $('who').innerHTML='<option value="all">📋 Összesített sorrend</option>'+(names.length>1?`<option value="each">👥 Mindenki külön (${names.length} kép)</option>`:'')+ranking().map(r=>`<option value="${r.c}">${r.pl}. ${esc(nm(r.c))}</option>`).join('');
+  const multi=futams.length>1,rk=ranking(),pf=futams.filter(played).length,medal=p=>['🥇','🥈','🥉'][p-1]||p+'.';
+  $('allbox').classList.toggle('hidden',!multi);
+  if(multi){
+    const ar=allRows();
+    $('ah').innerHTML=`<tr><th>#</th><th>Név</th><th>Futam</th><th>Pont</th>${useTime?'<th>Idő</th>':''}<th>Végered.</th></tr>`;
+    $('ab').innerHTML=ar.map(x=>`<tr><td>${medal(x.pl)}</td><td>${esc(x.name)}</td><td>${x.fut}.</td><td>${x.pp}</td>${useTime?`<td>${f2(x.ii)}</td>`:''}<td class="ok"><b>${f2(x.s)}</b></td></tr>`).join('');
+  }
+  const O=[];
+  if(multi)O.push(['allF','🏁 Összesített – összes futam, egy sorrendben']);
+  O.push(['all',multi?'📋 Ez a futam sorrendje':'📋 Összesített sorrend']);
+  if(multi)O.push(['byF',`📚 Minden futam sorrendje külön (${pf} kép)`]);
+  if(names.length>1)O.push(['each',multi?'👥 Ennek a futamnak minden versenyzője külön':`👥 Mindenki külön (${names.length} kép)`]);
+  if(multi)O.push(['eachAll',`👥 Minden futam minden versenyzője külön (${futams.filter(played).reduce((a,F)=>a+F.names.length,0)} kép)`]);
+  rk.forEach(r=>O.push([r.c,`${r.pl}. ${nm(r.c)}${multi?` (${fi+1}. futam)`:''}`]));
+  $('who').innerHTML=O.map(o=>`<option value="${o[0]}">${esc(o[1])}</option>`).join('');
 }
+function pickF(){load(+$('fsel').value);finish()}
+function nextF(){load(fi+1);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render()}
 function back(){show('run');ph='eles';ri=EK-1;ci=names.length-1;render()}
-function restart(){if(confirm('Új futam? A jelenlegi eredmények törlődnek (ha nem mentetted JPEG-be).'))show('setup')}
+function restart(){if(confirm('Új verseny kezdése? Az összes futam eredménye törlődik (ha nem mentetted).'))show('setup')}
 
 /* ---- JPEG ---- */
-function img(){
-  const rk=ranking(),both=mode=='both',cols=[];
+function img(list,head,sub){
+  const rk=list||ranking().map(r=>({...r,name:nm(r.c),D})),both=mode=='both',cols=[];
   if(both)for(let k=0;k<GK;k++)cols.push(['G'+(k+1),'gyak',k]);
   for(let k=0;k<EK;k++)cols.push(['É'+(k+1),'eles',k]);
-  const cw=96,pw=64,nw=240,tw=120,m=30,rh=60,tn=useTime?3:1,W=m*2+pw+nw+cols.length*cw+tn*tw,H=140+rh*(rk.length+1)+m;
+  const cw=96,pw=64,nw=rk.some(r=>r.fut)?310:240,tw=120,m=30,rh=60,tn=useTime?3:1,W=m*2+pw+nw+cols.length*cw+tn*tw,H=140+rh*(rk.length+1)+m;
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;const x=cv.getContext('2d');
   const F='"Segoe UI",Roboto,Arial,sans-serif';
   const T=(t,px,py,font,col,al)=>{x.font=font+' '+F;x.fillStyle=col;x.textAlign=al||'left';x.fillText(t,px,py)};
   x.fillStyle='#0f0f1a';x.fillRect(0,0,W,H);
-  T('Eredménytáblázat',m,52,'bold 34px','#00d4aa');
-  T(`${$('datum').value||''} · ${both?'Gyakorló + Éles futam':'Csak éles futam'} · ${names.length} versenyző${useTime?'':' · csak pont'}`,m,90,'20px','#aaa');
+  T(head||'Eredménytáblázat',m,52,'bold 34px','#00d4aa');
+  T(`${sub===undefined?fpre():sub}${$('datum').value||''} · ${both?'Gyakorló + Éles futam':'Csak éles futam'} · ${rk.length} versenyző${useTime?'':' · csak pont'}`,m,90,'20px','#aaa');
   const tx=m+pw+nw+cols.length*cw;
   let y=110;
   x.fillStyle='#252540';x.fillRect(m,y,W-2*m,rh);
@@ -182,10 +223,10 @@ function img(){
     y=110+rh*(i+1);
     if(i%2){x.fillStyle='rgba(255,255,255,.04)';x.fillRect(m,y,W-2*m,rh)}
     T(r.pl+'.',m+pw/2,y+38,'bold 24px',medal[r.pl-1]||'#e8e8e8','center');
-    let n=nm(r.c);x.font='bold 22px '+F;while(x.measureText(n).width>nw-12&&n.length>1)n=n.slice(0,-1);
+    let n=r.name+(r.fut?`  · ${r.fut}. futam`:'');x.font='bold 22px '+F;while(x.measureText(n).width>nw-12&&n.length>1)n=n.slice(0,-1);
     T(n,m+pw,y+38,'bold 22px','#e8e8e8');
     cols.forEach((c,k)=>{
-      const e=D[c[1]][c[2]]&&D[c[1]][c[2]][r.c],cx=m+pw+nw+k*cw+cw/2,g=c[1]=='gyak';
+      const e=r.D[c[1]][c[2]]&&r.D[c[1]][c[2]][r.c],cx=m+pw+nw+k*cw+cw/2,g=c[1]=='gyak';
       if(e){T(f2(e.r),cx,useTime?y+27:y+37,'bold 20px',e.v?(g?'#99a':'#fff'):'#ff6b6b','center');if(useTime)T(`${e.p} | ${f2(e.i)}`,cx,y+48,'13px','#888','center')}
       else T('–',cx,y+36,'20px','#555','center');
     });
@@ -210,9 +251,13 @@ async function putImg(cv,name){
 const stamp=()=>new Date().toTimeString().slice(0,8).replace(/:/g,'');
 const slug=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'')||'versenyzo';
 function items(){
-  const v=$('who').value,d=$('datum').value||'futam',rk=ranking();
-  const one=r=>({cv:imgOne(r.c),name:`eredmeny_${d}_${r.pl}_${slug(nm(r.c))}`});
-  if(v=='all')return [{cv:img(),name:`eredmeny_${d}_osszesitett`}];
+  const v=$('who').value,d=$('datum').value||'futam',multi=futams.length>1,fp=multi?'_f'+(fi+1):'';
+  const pf=futams.map((F,f)=>f).filter(f=>played(futams[f]));
+  if(v=='allF')return [{cv:img(allRows(),'Összesített eredmény','Összes futam · '),name:`eredmeny_${d}_osszes_futam_osszesitett`}];
+  if(v=='byF')return pf.map(f=>withF(f,()=>({cv:img(),name:`eredmeny_${d}_f${f+1}_osszesitett`})));
+  if(v=='eachAll')return pf.flatMap(f=>withF(f,()=>ranking().map(r=>({cv:imgOne(r.c),name:`eredmeny_${d}_f${f+1}_${r.pl}_${slug(nm(r.c))}`}))));
+  const rk=ranking(),one=r=>({cv:imgOne(r.c),name:`eredmeny_${d}${fp}_${r.pl}_${slug(nm(r.c))}`});
+  if(v=='all')return [{cv:img(),name:`eredmeny_${d}${fp}_osszesitett`}];
   if(v=='each')return rk.map(one);
   return [one(rk.find(r=>r.c==+v))];
 }
@@ -240,7 +285,7 @@ function imgOne(c){
   const cx=k=>m+cw*(k+.5);
   x.fillStyle='#0f0f1a';x.fillRect(0,0,W,H);
   T(nm(c),m,62,'bold 42px','#00d4aa');
-  T(`${$('datum').value||''} · ${both?'Gyakorló + Éles futam':'Csak éles futam'}${useTime?'':' · csak pont'}`,m,98,'20px','#aaa');
+  T(`${fpre()}${$('datum').value||''} · ${both?'Gyakorló + Éles futam':'Csak éles futam'}${useTime?'':' · csak pont'}`,m,98,'20px','#aaa');
   T(`${me.pl}. hely a(z) ${names.length} versenyzőből`,m,138,'bold 26px',['#ffd93d','#cfd8dc','#e29a5b'][me.pl-1]||'#e8e8e8');
   let y=160;
   x.fillStyle='#252540';x.fillRect(m,y,W-2*m,rh);
