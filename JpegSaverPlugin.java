@@ -132,4 +132,44 @@ public class JpegSaverPlugin extends Plugin {
             call.reject("Küldési hiba: " + e.getMessage());
         }
     }
+
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        String data = call.getString("data");
+        String name = call.getString("name", "eredmeny.xlsx");
+        String mime = call.getString("mime", "application/octet-stream");
+        if (data == null) {
+            call.reject("Nincs adat");
+            return;
+        }
+        if (Build.VERSION.SDK_INT < 29) {
+            call.reject("Ehhez Android 10 vagy újabb kell");
+            return;
+        }
+        try {
+            byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+            ContentResolver resolver = getContext().getContentResolver();
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Eredmenytablazat");
+            Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                call.reject("Nem sikerült létrehozni a fájlt");
+                return;
+            }
+            OutputStream out = resolver.openOutputStream(uri);
+            if (out == null) {
+                call.reject("Nem sikerült megnyitni a fájlt");
+                return;
+            }
+            out.write(bytes);
+            out.close();
+            JSObject ret = new JSObject();
+            ret.put("uri", uri.toString());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Mentési hiba: " + e.getMessage());
+        }
+    }
 }
