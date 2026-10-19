@@ -15,7 +15,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: www mappa elokeszitese
-        run: mkdir -p www && cp index.html www/
+        run: mkdir -p www && cp index.html xlsx.full.min.js www/
       - run: npm install
       - run: npx cap add android
       - name: Mento kod beepitese
