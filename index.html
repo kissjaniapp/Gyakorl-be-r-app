@@ -49,6 +49,15 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
   <label style="margin-top:12px">Számolás</label>
   <div class="g2"><button class="m on" id="t-ido" onclick="setTime(true)">Pont + Idő</button><button class="m" id="t-pont" onclick="setTime(false)">Csak pont</button></div>
   <div class="row"><button class="p" onclick="start()">▶ Kezdés</button></div>
+  <details style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
+    <summary style="color:var(--ac2);font-weight:700;cursor:pointer">☁️ Google Táblázat automatikus küldés beállítása</summary>
+    <label style="margin-top:10px">Google Apps Script webalkalmazás URL-je</label>
+    <input id="googleUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    <label style="margin-top:8px">Közös kulcs (ugyanaz, mint a Google Apps Scriptben)</label>
+    <input id="googleKey" type="password" placeholder="A Google Apps Scriptben beállított kulcs" autocomplete="off">
+    <div class="row"><button class="n" type="button" onclick="saveGoogleConfig()">Beállítások mentése</button></div>
+    <div class="mu" style="margin-top:6px">Ezt egyszer kell beállítani. A verseny végén az eredmények automatikusan mennek a táblázatba; a képes mentés, Excel és Messenger/Viber megosztás változatlan marad.</div>
+  </details>
 </div>
 
 <div id="run" class="hidden">
@@ -68,6 +77,7 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
     <div class="row" style="margin:0 0 12px"><button class="p hidden" id="bnf" onclick="nextF()" style="padding:16px 10px;font-size:1.1rem">Következő futam →</button></div>
     <div id="fbox" class="hidden" style="margin-bottom:10px"><label>Futam</label><select id="fsel" onchange="pickF()"></select></div>
     <div class="mu" id="ft" style="font-weight:600;margin-bottom:8px">🏆 Végeredmény</div>
+    <div class="mu" id="googleStatus" role="status" aria-live="polite" style="margin-bottom:8px"></div>
     <table><thead><tr><th>#</th><th>Név</th><th>Pont</th><th id="fti">Idő</th><th>Végered.</th></tr></thead><tbody id="fb"></tbody></table>
     <div id="allbox" class="hidden" style="margin-top:16px"><div class="mu" style="font-weight:600;margin-bottom:8px">🏁 Összesített állás – összes futam eddig</div>
     <table><thead id="ah"></thead><tbody id="ab"></tbody></table></div>
@@ -83,12 +93,89 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
 
 <script>
 const GK=3,EK=9;
-let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]};
+let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]},autoSentForRun=false;
 const $=id=>document.getElementById(id),f2=x=>x.toFixed(2),eq=(a,b)=>Math.abs(a-b)<1e-9;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nm=i=>names[i]||`Versenyző ${i+1}`, mx=()=>ph=='gyak'?GK:EK;
 const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?null:n};
 $('datum').valueAsDate=new Date();
+
+/* ---- Automatikus Google Táblázat-szinkron ----
+   A Google Apps Script URL-je és a közös kulcs a beállításokban tárolódik.
+   A küldési sor helyben marad, ha nincs hálózat; online állapotban újrapróbálkozik.
+*/
+const GOOGLE_URL_STORE='eredmenyBeiroGoogleUrlV1';
+const GOOGLE_KEY_STORE='eredmenyBeiroGoogleKeyV1';
+const GOOGLE_QUEUE_STORE='eredmenyBeiroGoogleQueueV1';
+const googleRead=(k,d='')=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
+const googleWrite=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){return false}};
+function initGoogleConfig(){
+  $('googleUrl').value=googleRead(GOOGLE_URL_STORE);
+  $('googleKey').value=googleRead(GOOGLE_KEY_STORE);
+  if(navigator.onLine)drainGoogleQueue();
+}
+function saveGoogleConfig(){
+  const url=$('googleUrl').value.trim(),key=$('googleKey').value.trim();
+  if(url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test(url)){
+    alert('Ellenőrizd a címet: a Google Apps Script webalkalmazás /exec végpontját kell megadni.');return;
+  }
+  if(!googleWrite(GOOGLE_URL_STORE,url)||!googleWrite(GOOGLE_KEY_STORE,key)){
+    alert('A beállításokat nem sikerült elmenteni ezen az eszközön.');return;
+  }
+  setGoogleStatus(url&&key?'Google Táblázat beállítva. A küldés automatikus.':'A Google Táblázat nincs teljesen beállítva; az eredmények helyben várakoznak.');
+  drainGoogleQueue();
+}
+function googleQueue(){try{return JSON.parse(googleRead(GOOGLE_QUEUE_STORE,'[]'))||[]}catch(e){return []}}
+function saveGoogleQueue(q){return googleWrite(GOOGLE_QUEUE_STORE,JSON.stringify(q))}
+function setGoogleStatus(msg){const el=$('googleStatus');if(el)el.textContent=msg||''}
+function makeGooglePayload(){
+  const now=new Date(),eventId='verseny-'+now.getTime()+'-'+Math.random().toString(36).slice(2,9);
+  const results=[];
+  futams.forEach((F,idx)=>{
+    if(!played(F))return;
+    F.names.forEach((name,c)=>{
+      const hasResult=F.D.eles.some(R=>R&&R[c])||F.D.gyak.some(R=>R&&R[c]);
+      if(!hasResult)return;
+      const t=tot(c,F.D);
+      results.push({name:String(name||('Versenyző '+(c+1))).trim(),heat:idx+1,points:t.pp,totalTime:Number(t.ii)||0,result:Number(t.s)||0});
+    });
+  });
+  return {eventId,date:$('datum').value||now.toISOString().slice(0,10),mode:mode,usedTime:!!useTime,createdAt:now.toISOString(),results};
+}
+function queueGoogleCompetition(){
+  if(autoSentForRun)return;
+  autoSentForRun=true;
+  const payload=makeGooglePayload();
+  if(!payload.results.length){setGoogleStatus('Nincs elküldhető eredmény.');return;}
+  const q=googleQueue();q.push(payload);
+  if(!saveGoogleQueue(q)){setGoogleStatus('Nem sikerült elmenteni a küldési sort ezen a telefonon.');return;}
+  if(!googleRead(GOOGLE_URL_STORE)||!googleRead(GOOGLE_KEY_STORE)){
+    setGoogleStatus('Az eredmény várakozik: állítsd be a Google Táblázat URL-jét és kulcsát a kezdőképernyőn.');return;
+  }
+  setGoogleStatus('A versenyeredmények automatikus küldése folyamatban…');
+  drainGoogleQueue();
+}
+let googleDrainBusy=false;
+async function drainGoogleQueue(){
+  if(googleDrainBusy||!navigator.onLine)return;
+  const url=googleRead(GOOGLE_URL_STORE),key=googleRead(GOOGLE_KEY_STORE);
+  if(!url||!key)return;
+  googleDrainBusy=true;
+  try{
+    let q=googleQueue();
+    while(q.length&&navigator.onLine){
+      const payload=q[0];
+      // text/plain avoids a CORS preflight; no-cors lets the WebView dispatch to Apps Script.
+      await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({...payload,secret:key})});
+      q.shift();saveGoogleQueue(q);
+      setGoogleStatus(q.length?'Eredmények küldve; további eredmények küldése…':'✅ Az eredmények küldése elindult a Google Táblázat felé.');
+    }
+  }catch(e){
+    setGoogleStatus('A Google Táblázat nem érhető el. Az eredmények a telefonon várakoznak, és online állapotban újrapróbáljuk.');
+  }finally{googleDrainBusy=false;}
+}
+window.addEventListener('online',drainGoogleQueue);
+window.addEventListener('pageshow',()=>{if(navigator.onLine)drainGoogleQueue()});
 
 function drawSetup(){
   const old=FN.map((n,f)=>[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value));
@@ -107,6 +194,7 @@ drawSetup();
 
 function show(id){['setup','run','done'].forEach(s=>$(s).classList.toggle('hidden',s!=id))}
 function start(){
+  autoSentForRun=false;
   futams=FN.map((n,f)=>({names:[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value.trim()),D:{gyak:[],eles:[]}}));
   load(0);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render();
 }
@@ -207,6 +295,7 @@ function finish(){
   if(multi)O.push(['eachAll',`👥 Minden futam minden versenyzője külön (${futams.filter(played).reduce((a,F)=>a+F.names.length,0)} kép)`]);
   rk.forEach(r=>O.push([r.c,`${r.pl}. ${nm(r.c)}${multi?` (${fi+1}. futam)`:''}`]));
   $('who').innerHTML=O.map(o=>`<option value="${o[0]}">${esc(o[1])}</option>`).join('');
+  if(fi===futams.length-1)queueGoogleCompetition();
 }
 function pickF(){load(+$('fsel').value);finish()}
 function nextF(){load(fi+1);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render()}
@@ -441,5 +530,6 @@ function imgOne(c){
   T(useTime?`Össz pont: ${me.pp} · Össz idő: ${f2(me.ii)}`:`Összesen ${names.length} versenyző`,m,y+90,'18px','#888');
   return cv;
 }
+initGoogleConfig();
 if(!native&&'serviceWorker' in navigator&&location.protocol.indexOf('http')==0)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script></body></html>
