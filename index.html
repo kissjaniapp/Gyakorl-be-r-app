@@ -77,7 +77,7 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
     <div class="row" style="margin:0 0 12px"><button class="p hidden" id="bnf" onclick="nextF()" style="padding:16px 10px;font-size:1.1rem">Következő futam →</button></div>
     <div id="fbox" class="hidden" style="margin-bottom:10px"><label>Futam</label><select id="fsel" onchange="pickF()"></select></div>
     <div class="mu" id="ft" style="font-weight:600;margin-bottom:8px">🏆 Végeredmény</div>
-    <div class="mu" id="googleStatus" role="status" aria-live="polite" style="margin-bottom:8px"></div>
+    <div class="mu hidden" id="googleStatus" aria-hidden="true"></div>
     <table><thead><tr><th>#</th><th>Név</th><th>Pont</th><th id="fti">Idő</th><th>Végered.</th></tr></thead><tbody id="fb"></tbody></table>
     <div id="allbox" class="hidden" style="margin-top:16px"><div class="mu" style="font-weight:600;margin-bottom:8px">🏁 Összesített állás – összes futam eddig</div>
     <table><thead id="ah"></thead><tbody id="ab"></tbody></table></div>
@@ -125,7 +125,10 @@ function saveGoogleConfig(){
   setGoogleStatus(url&&key?'Google Táblázat beállítva. A küldés automatikus.':'A Google Táblázat nincs teljesen beállítva; az eredmények helyben várakoznak.');
   drainGoogleQueue();
 }
-function googleQueue(){try{return JSON.parse(googleRead(GOOGLE_QUEUE_STORE,'[]'))||[]}catch(e){return []}}
+function googleQueue(){
+  try{const q=JSON.parse(googleRead(GOOGLE_QUEUE_STORE,'[]'));return Array.isArray(q)?q:[]}
+  catch(e){return []}
+}
 function saveGoogleQueue(q){return googleWrite(GOOGLE_QUEUE_STORE,JSON.stringify(q))}
 function setGoogleStatus(msg){const el=$('googleStatus');if(el)el.textContent=msg||''}
 function makeGooglePayload(){
@@ -144,38 +147,72 @@ function makeGooglePayload(){
 }
 function queueGoogleCompetition(){
   if(autoSentForRun)return;
-  autoSentForRun=true;
   const payload=makeGooglePayload();
-  if(!payload.results.length){setGoogleStatus('Nincs elküldhető eredmény.');return;}
+  if(!payload.results.length){setGoogleStatus('Nincs elküldhető eredmény.');return}
   const q=googleQueue();q.push(payload);
-  if(!saveGoogleQueue(q)){setGoogleStatus('Nem sikerült elmenteni a küldési sort ezen a telefonon.');return;}
+  if(!saveGoogleQueue(q)){setGoogleStatus('Nem sikerült elmenteni a küldési sort ezen a telefonon.');return}
+  autoSentForRun=true;
   if(!googleRead(GOOGLE_URL_STORE)||!googleRead(GOOGLE_KEY_STORE)){
-    setGoogleStatus('Az eredmény várakozik: állítsd be a Google Táblázat URL-jét és kulcsát a kezdőképernyőn.');return;
+    setGoogleStatus('Az eredmény várakozik: nincs beállítva a Google URL és a közös kulcs.');return;
   }
-  setGoogleStatus('A versenyeredmények automatikus küldése folyamatban…');
   drainGoogleQueue();
 }
 let googleDrainBusy=false;
+async function sendGoogleAndConfirm(url,key,payload){
+  const data=JSON.stringify({...payload,secret:key});
+  let status,reply;
+  if(native){
+    // Native Capacitor HTTP bypasses WebView CORS and returns Apps Script's response.
+    const r=await nat('CapacitorHttp','post',{
+      url,headers:{'Content-Type':'text/plain;charset=UTF-8'},data,
+      connectTimeout:15000,readTimeout:30000
+    });
+    status=r.status;reply=r.data;
+  }else{
+    // Never use no-cors: opaque responses do not confirm a successful write.
+    const r=await fetch(url,{
+      method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},
+      body:data,redirect:'follow'
+    });
+    status=r.status;reply=await r.text();
+  }
+  if(!(status>=200&&status<300))throw new Error('Google HTTP '+status);
+  if(typeof reply==='string'){
+    try{reply=JSON.parse(reply)}
+    catch(e){throw new Error('A Google nem JSON sikerigazolást küldött')}
+  }
+  if(!reply||reply.ok!==true||(
+    reply.eventId!=null&&String(reply.eventId)!==String(payload.eventId)
+  ))throw new Error('A Google nem igazolta az eredmény mentését');
+}
 async function drainGoogleQueue(){
   if(googleDrainBusy||!navigator.onLine)return;
   const url=googleRead(GOOGLE_URL_STORE),key=googleRead(GOOGLE_KEY_STORE);
   if(!url||!key)return;
   googleDrainBusy=true;
   try{
-    let q=googleQueue();
-    while(q.length&&navigator.onLine){
+    while(navigator.onLine){
+      const q=googleQueue();if(!q.length)break;
       const payload=q[0];
-      // text/plain avoids a CORS preflight; no-cors lets the WebView dispatch to Apps Script.
-      await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({...payload,secret:key})});
-      q.shift();saveGoogleQueue(q);
-      setGoogleStatus(q.length?'Eredmények küldve; további eredmények küldése…':'✅ Az eredmények küldése elindult a Google Táblázat felé.');
+      await sendGoogleAndConfirm(url,key,payload);
+      // Another competition may have been added during the async network request.
+      const latest=googleQueue();
+      const idx=latest.findIndex(p=>p.eventId===payload.eventId);
+      if(idx<0)throw new Error('A küldési sor közben megváltozott');
+      latest.splice(idx,1);
+      if(!saveGoogleQueue(latest))throw new Error('A küldési sor mentése sikertelen');
+      setGoogleStatus('A Google visszaigazolta az eredmények mentését.');
     }
   }catch(e){
-    setGoogleStatus('A Google Táblázat nem érhető el. Az eredmények a telefonon várakoznak, és online állapotban újrapróbáljuk.');
-  }finally{googleDrainBusy=false;}
+    // Keep pending results for retries; server deduplicates by the stable eventId.
+    console.warn('Google eredményfeltöltés sikertelen; később újrapróbáljuk:',e);
+    setGoogleStatus('A küldés még nincs visszaigazolva; az eredmények a telefonon maradnak.');
+  }finally{googleDrainBusy=false}
 }
 window.addEventListener('online',drainGoogleQueue);
 window.addEventListener('pageshow',()=>{if(navigator.onLine)drainGoogleQueue()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)drainGoogleQueue()});
+setInterval(()=>{if(!document.hidden&&navigator.onLine)drainGoogleQueue()},60000);
 
 function drawSetup(){
   const old=FN.map((n,f)=>[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value));
