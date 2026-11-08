@@ -109,7 +109,21 @@ const GOOGLE_KEY_STORE='eredmenyBeiroGoogleKeyV1';
 const GOOGLE_QUEUE_STORE='eredmenyBeiroGoogleQueueV1';
 const googleRead=(k,d='')=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
 const googleWrite=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){return false}};
-function initGoogleConfig(){
+async function initGoogleConfig(){
+  // If the APK was built with Actions secrets, load its local embedded config.
+  // Secrets are never committed to index.html or the public repository.
+  if(native){
+    try{
+      const r=await fetch('./google-config.json',{cache:'no-store'});
+      if(r.ok){
+        const cfg=await r.json();
+        if(typeof cfg.url==='string'&&/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test(cfg.url)&&typeof cfg.key==='string'&&cfg.key){
+          googleWrite(GOOGLE_URL_STORE,cfg.url);
+          googleWrite(GOOGLE_KEY_STORE,cfg.key);
+        }
+      }
+    }catch(e){console.warn('Beépített Google konfiguráció nincs; a mentett beállításokat használjuk.')}
+  }
   $('googleUrl').value=googleRead(GOOGLE_URL_STORE);
   $('googleKey').value=googleRead(GOOGLE_KEY_STORE);
   if(navigator.onLine)drainGoogleQueue();
