@@ -1,8 +1,8 @@
 // Eredmény beíró – Google Táblázat fogadó
 // Másold ezt a teljes kódot a Google Apps Script szerkesztőbe.
 // A korábbi fogadó ugyanazon táblázatát és SECRET beállítását használja.
-// Add meg a saját Google Táblázat azonosítóját.
-const SPREADSHEET_ID = 'IDE_IRD_A_TABLAZAT_AZONOSITOJAT';
+// Add meg a saját táblázatod azonosítóját a telepítés előtt.
+const SPREADSHEET_ID = 'SAJAT_TABLAZAT_AZONOSITO';
 const RESULTS_SHEET = 'Eredmények';
 const RANKING_SHEET = 'Összesített ranglista';
 const ROUNDS_SHEET = 'Körök részletei';
@@ -72,11 +72,11 @@ function doPost(e) {
       updateRounds_(ss, p, stamp);
     }
     updateEventSheet_(ss, p);
-    // A kért sorrend: ranglista, majd az összesített eredményeket tartalmazó lap.
     ss.setActiveSheet(ranking);
     ss.moveActiveSheet(1);
-    ss.setActiveSheet(sh);
-    ss.moveActiveSheet(2);
+    sh.hideSheet();
+    const detail = findRoundsSheet_(ss);
+    if (detail) detail.hideSheet();
     if (revision > previous) props.setProperty(revisionKey, String(revision));
     return out_({ok:true,eventId:p.eventId,results:added.length,schemaVersion:2});
   } catch (err) {
@@ -125,83 +125,120 @@ function sheetText_(value) {
   const s=String(value == null ? '' : value);
   return /^[=+\-@]/.test(s) ? "'" + s : s;
 }
+function modeLabel_(s) { const m=String(s||'').toLowerCase(); return m==='both' ? 'Gyakorló + Éles' : m==='eles' ? 'Éles' : m==='gyak' ? 'Gyakorló' : String(s||''); }
+function rankingSheet_(ss, heading) {
+  const old=['Helyezés','Versenyző','Legjobb végeredmény','Pont','Össz idő','Dátum','Futam'];
+  const sh=ss.getSheetByName(RANKING_SHEET);
+  if (sh && sh.getLastRow()) {
+    const row=sh.getRange(1,1,1,old.length).getValues()[0];
+    if (old.every((v,i)=>row[i]===v)) { const extra=sh.getRange(1,8,sh.getLastRow(),3); if(extra.getValues().every(r=>r.every(v=>v==='' || v==null)) && extra.getFormulas().every(r=>r.every(v=>!v))) return sh; }
+  }
+  return getManagedSheet_(ss,RANKING_SHEET,heading);
+}
 function updateRanking_(ss, rows, columns) {
-  const heading=['Helyezés','Versenyző','Legjobb végeredmény','Pont','Össz idő','Dátum','Futam'];
-  const sh = getManagedSheet_(ss, RANKING_SHEET, heading);
-  const best = new Map();
-  rows.forEach(r => {
-    // A régi sorokban nem szerepelt típus; ezeket versenyként kezeljük.
-    if (String(r[columns.type] || '').toLocaleLowerCase() === 'gyakorlás') return;
-    const name = String(r[columns.name] || '').trim();
-    if (!name) return;
-    const key = name.toLocaleLowerCase();
-    const item = {name, result:Number(r[columns.result])||0, points:Number(r[columns.points])||0, time:Number(r[columns.time])||0, date:String(r[columns.date]||''), heat:Number(r[columns.heat])||1};
-    const prev = best.get(key);
-    // A program pontozása szerint a nagyobb végeredmény a jobb; döntetlennél a nagyobb összidő kerül előre.
-    if (!prev || item.result > prev.result || (item.result === prev.result && item.time > prev.time)) best.set(key,item);
+  const heading=['Helyezés','Versenyző','Legjobb végeredmény','Pont','Össz idő','Dátum','Helyszín','Esemény','Versenymód','Futam'];
+  const sh=rankingSheet_(ss,heading), best=new Map();
+  rows.forEach(r=>{
+    const name=String(r[columns.name]||'').trim(); if (!name) return;
+    const item={name,result:Number(r[columns.result])||0,points:Number(r[columns.points])||0,time:Number(r[columns.time])||0,date:r[columns.date]||'',location:r[columns.location]||'',type:r[columns.type]||'',mode:r[columns.mode]||'',heat:Number(r[columns.heat])||1};
+    const key=name.toLocaleLowerCase(), prev=best.get(key);
+    if (!prev || item.result>prev.result || (item.result===prev.result && item.time>prev.time)) best.set(key,item);
   });
-  const list = Array.from(best.values()).sort((a,b)=>b.result-a.result || b.time-a.time || a.name.localeCompare(b.name,'hu'));
-  const data = [['Helyezés','Versenyző','Legjobb végeredmény','Pont','Össz idő','Dátum','Futam']];
-  list.forEach((r,i)=>data.push([i+1,sheetText_(r.name),r.result,r.points,r.time,sheetText_(r.date),r.heat]));
-  const oldLast=sh.getLastRow();
-  sh.getRange(1,1,data.length,data[0].length).setValues(data);
-  if (oldLast>data.length) sh.getRange(data.length+1,1,oldLast-data.length,data[0].length).clearContent();
-  styleHeader_(sh,data[0].length);
-  sh.setFrozenRows(1);
-  if (list.length) sh.getRange(2,3,list.length,3).setNumberFormat('0.00');
-  sh.autoResizeColumns(1,data[0].length);
+  const list=Array.from(best.values()).sort((a,b)=>b.result-a.result||b.time-a.time||a.name.localeCompare(b.name,'hu'));
+  const data=[heading]; list.forEach((r,i)=>data.push([i+1,sheetText_(r.name),r.result,r.points,r.time,r.date,sheetText_(r.location),sheetText_(r.type),sheetText_(modeLabel_(r.mode)),r.heat]));
+  const oldLast=sh.getLastRow(); sh.getRange(1,1,data.length,heading.length).setValues(data);
+  if (oldLast>data.length) sh.getRange(data.length+1,1,oldLast-data.length,heading.length).clearContent();
+  styleHeader_(sh,heading.length); sh.setFrozenRows(1);
+  if(list.length) sh.getRange(2,3,list.length,3).setNumberFormat('0.00');
   return sh;
 }
+function findRoundsSheet_(ss) {
+  const h=['Versenyazonosító','Dátum','Helyszín','Esemény típusa','Futam','Versenyző','Szakasz','Kör','Pont','Idő','Eredmény','Érvényes','Rögzítés ideje'];
+  return ss.getSheets().find(sh=>{const n=sh.getName();if(n!==ROUNDS_SHEET && !/^Körök részletei [0-9]+$/.test(n)) return false; const a=sh.getRange(1,1,1,h.length).getValues()[0];return h.every((x,i)=>a[i]===x);})||null;
+}
+function existingEvent_(ss,id) {
+  return ss.getSheets().find(sh=>{const cell=sh.getRange(1,1), v=sh.getRange(1,1,1,2).getValues()[0]; return (v[0]==='Eredmény beíró esemény' && String(v[1])===id) || cell.getNote()==='Eredmény beíró esemény: '+id;})||null;
+}
+function eventTitle_(p) {
+  const type=p.eventType==='gyakorlas'?'Gyakorlás':p.eventType==='verseny'?'Verseny':'Esemény';
+  return [String(p.date||''),String(p.location||''),type].filter(Boolean).join(' – ').replace(/[\\/\?*\[\]:]/g,' ').slice(0,85)||'Esemény';
+}
+function renameEvent_(ss,sh,p) {
+  const base=eventTitle_(p); let candidate=base;
+  for(let i=2;i<1000;i++) {const occupied=ss.getSheetByName(candidate);if(!occupied||occupied===sh){if(sh.getName()!==candidate)sh.setName(candidate);return;}candidate=base.slice(0,90)+' '+i;}
+  throw new Error('Nem nevezhető el az eseménylap.');
+}
+function formatRound_(x) { if(x==null || x==='') return ''; const n=Number(x); return Number.isFinite(n)?n.toFixed(2).replace('.',','):String(x); }
 
-// Az egyedi lap neve eseményazonosítóból származik, a lap elején lévő jelölés
-// ellenőrzése megakadályozza, hogy egy hasonló nevű felhasználói lapot felülírjunk.
-function updateEventSheet_(ss, p) {
-  const id=String(p.eventId);
-  let hash=2166136261;
-  for (let i=0;i<id.length;i++) hash=Math.imul(hash ^ id.charCodeAt(i),16777619);
-  const base='Esemény '+id.replace(/[^A-Za-z0-9_-]/g,'_').slice(0,50)+' '+(hash>>>0).toString(16);
-  let sh;
-  for (let n=0;n<1000;n++) {
-    const name=base+(n ? ' '+n : '');
-    sh=ss.getSheetByName(name);
-    if (!sh) { sh=ss.insertSheet(name); break; }
-    const marker=sh.getRange(1,1,1,2).getValues()[0];
-    if (marker[0]==='Eredmény beíró esemény' && String(marker[1])===id) {
-      // A régi kliens nem küld köröket; ne írja felül a meglévő részletes lapot.
-      if (!p.results.some(r=>Array.isArray(r.rounds))) return;
-      break;
-    }
-    sh=null;
+function updateEventSheet_(ss,p) {
+  const id=String(p.eventId); let sh=existingEvent_(ss,id);
+  if(sh && !p.results.some(r=>Array.isArray(r.rounds))) return;
+  if(!sh) {
+    const base=eventTitle_(p); let name=base, i=2;
+    while(ss.getSheetByName(name)) {name=base.slice(0,90)+' '+i++; if(i>1000)throw new Error('Nem hozható létre eseménylap.');}
+    sh=ss.insertSheet(name);
   }
-  if (!sh) throw new Error('Nem hozható létre eseménylap.');
   const keys=[];
   p.results.forEach(r=>(Array.isArray(r.rounds)?r.rounds:[]).forEach(q=>{
-    const phase=String(q.phase||''),round=Number(q.round)||1,key=phase+':'+round;
-    if (!keys.some(x=>x.key===key)) keys.push({key,phase,round});
+    const phase=String(q.phase||''), round=Number(q.round)||1, key=phase+':'+round;
+    if(!keys.some(x=>x.key===key))keys.push({key,phase,round});
   }));
   keys.sort((a,b)=>(a.phase==='gyak'?0:a.phase==='eles'?1:2)-(b.phase==='gyak'?0:b.phase==='eles'?1:2)||a.phase.localeCompare(b.phase)||a.round-b.round);
   const header=['Futam','Versenyző'].concat(keys.map(x=>sheetText_((x.phase==='gyak'?'G':x.phase==='eles'?'É':x.phase+' ')+x.round)),['Összes pont','Összes idő','Végeredmény']);
-  const info=['Eredmény beíró esemény',sheetText_(id),'Dátum',sheetText_(p.date||''),'Helyszín',sheetText_(p.location||''),'Típus',p.eventType==='gyakorlas'?'Gyakorlás':p.eventType==='verseny'?'Verseny':''];
-  const width=Math.max(info.length,header.length), pad=row=>Array.from({length:width},(_,i)=>i<row.length?row[i]:'');
+  const info=['Dátum',sheetText_(p.date||''),'Helyszín',sheetText_(p.location||''),'Esemény',p.eventType==='gyakorlas'?'Gyakorlás':p.eventType==='verseny'?'Verseny':'','Versenymód',sheetText_(modeLabel_(p.mode))];
+  const width=Math.max(info.length,header.length),pad=row=>Array.from({length:width},(_,i)=>i<row.length?row[i]:'');
   const data=[pad(info),pad(header)];
-  p.results.forEach(r => {
-    const rounds=Array.isArray(r.rounds) ? r.rounds : [];
-    const cells=keys.map(k=>{
-      const q=rounds.find(x=>(String(x.phase||'')+':'+(Number(x.round)||1))===k.key);
-      if (!q) return '';
-      return sheetText_((q.result == null ? '' : String(q.result))+'\n'+[q.points == null ? '' : q.points,q.time == null ? '' : q.time].join(' | ')+(q.valid?'':' (érvénytelen)'));
-    });
+  p.results.forEach(r=>{const rounds=Array.isArray(r.rounds)?r.rounds:[];
+    const cells=keys.map(k=>{const q=rounds.find(x=>(String(x.phase||'')+':'+(Number(x.round)||1))===k.key);if(!q)return '';return sheetText_(formatRound_(q.result)+'\n'+[formatRound_(q.points),formatRound_(q.time)].join(' | ')+(q.valid?'':' (érvénytelen)'));});
     data.push(pad([Number(r.heat)||1,sheetText_(r.name||'')].concat(cells,[Number(r.points)||0,Number(r.totalTime)||0,Number(r.result)||0])));
   });
-  const previousRange=sh.getDataRange().getValues();
-  const oldRows=previousRange.length,oldWidth=previousRange[0].length;
+  const previousRange=sh.getDataRange().getValues(), oldRows=previousRange.length, oldWidth=previousRange[0].length;
+  sh.getRange(1,1).setNote('Eredmény beíró esemény: '+id);
   sh.getRange(1,1,data.length,width).setValues(data);
-  if (oldRows>data.length) sh.getRange(data.length+1,1,oldRows-data.length,oldWidth).clearContent();
-  if (oldWidth>width) sh.getRange(1,width+1,Math.min(oldRows,data.length),oldWidth-width).clearContent();
-  styleHeader_(sh,width);
-  sh.getRange(2,1,1,width).setFontWeight('bold').setBackground('#252540').setFontColor('#ffffff');
-  if (data.length>2) sh.getRange(3,1,data.length-2,width).setWrap(true);
-  sh.setFrozenRows(2);
+  if(oldRows>data.length)sh.getRange(data.length+1,1,oldRows-data.length,oldWidth).clearContent();
+  if(oldWidth>width)sh.getRange(1,width+1,Math.min(oldRows,data.length),oldWidth-width).clearContent();
+  styleHeader_(sh,width); sh.getRange(2,1,1,width).setFontWeight('bold').setBackground('#252540').setFontColor('#ffffff');
+  if(data.length>2){sh.getRange(3,1,data.length-2,width).setWrap(true);sh.getRange(3,width-2,data.length-2,3).setNumberFormat('0.00');}
+  sh.setFrozenRows(2); renameEvent_(ss,sh,p);
+}
+
+// Egyszeri nézetfrissítés: csak meglévő eseménylapokat és ismert részleteket használ.
+function nezetFrissitese() {
+  const lock=LockService.getScriptLock();lock.waitLock(20000);
+  try {
+    const ss=SpreadsheetApp.openById(SPREADSHEET_ID), sh=ss.getSheetByName(RESULTS_SHEET);
+    if(!sh || !sh.getLastRow()) throw new Error('Az Eredmények adatlap nem található.');
+    const data=sh.getDataRange().getValues(),h=data[0].slice(),c=resultColumns_(h),rows=data.slice(1);
+    const ranking=updateRanking_(ss,rows,c), ds=findRoundsSheet_(ss), details=ds?ds.getDataRange().getValues().slice(1):[];
+    const ids=Array.from(new Set(rows.map(r=>String(r[c.id]||'')).filter(Boolean)));
+    ids.forEach(id=>{
+      const eventSheet=existingEvent_(ss,id);if(!eventSheet)return;
+      const all=eventSheet.getDataRange().getValues();
+      const entry=rows.find(r=>String(r[c.id])===id);if(!entry)return;
+      const oldInfo=all[0]||[], legacy=oldInfo[0]==='Eredmény beíró esemény';
+      const oldType=legacy ? oldInfo[7] : oldInfo[5];
+      const typeValue=String(entry[c.type]||oldType||'').toLowerCase();
+      const type=typeValue==='gyakorlás'?'gyakorlas':typeValue==='verseny'?'verseny':'';
+      const p={eventId:id,date:entry[c.date]||(legacy?oldInfo[3]:oldInfo[1])||'',location:entry[c.location]||(legacy?oldInfo[5]:oldInfo[3])||'',eventType:type,mode:entry[c.mode]||''};
+      // A meglévő eseménylap a részletek forrása; nem építjük újra hiányos háttéradatból.
+      const info=['Dátum',sheetText_(p.date),'Helyszín',sheetText_(p.location),'Esemény',type==='gyakorlas'?'Gyakorlás':type==='verseny'?'Verseny':'','Versenymód',sheetText_(modeLabel_(p.mode))];
+      eventSheet.getRange(1,1).setNote('Eredmény beíró esemény: '+id);
+      eventSheet.getRange(1,1,1,info.length).setValues([info]);
+      // Csak a felismert futamcellák számait kerekítjük, minden többi értéket érintetlenül hagyunk.
+      if(all.length>2) {
+        const heads=all[1];
+        heads.forEach((head,col)=>{if(!/^[GÉ]\d+$/.test(String(head)))return;
+          for(let row=2;row<all.length;row++) {
+            const original=String(all[row][col]||'');
+            const match=original.match(/^(-?\d+(?:[.,]\d+)?)\n(-?\d+(?:[.,]\d+)?) \| (-?\d+(?:[.,]\d+)?)( \(érvénytelen\))?$/);
+            if(match)eventSheet.getRange(row+1,col+1).setValues([[sheetText_([formatRound_(match[1].replace(',','.')),formatRound_(match[2].replace(',','.'))+' | '+formatRound_(match[3].replace(',','.'))+(match[4]||'')].join('\n'))]]);
+          }
+        });
+      }
+      renameEvent_(ss,eventSheet,p);
+    });
+    ss.setActiveSheet(ranking);ss.moveActiveSheet(1);sh.hideSheet();if(ds)ds.hideSheet();
+  } finally {lock.releaseLock();}
 }
 
 function getSheet_(ss,name,headers) {
