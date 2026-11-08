@@ -49,7 +49,7 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
   <label style="margin-top:12px">Számolás</label>
   <div class="g2"><button class="m on" id="t-ido" onclick="setTime(true)">Pont + Idő</button><button class="m" id="t-pont" onclick="setTime(false)">Csak pont</button></div>
   <div class="row"><button class="p" onclick="start()">▶ Kezdés</button></div>
-  <details style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
+  <details id="googleSettings" style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
     <summary style="color:var(--ac2);font-weight:700;cursor:pointer">☁️ Google Táblázat automatikus küldés beállítása</summary>
     <label style="margin-top:10px">Google Apps Script webalkalmazás URL-je</label>
     <input id="googleUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
@@ -118,8 +118,10 @@ async function initGoogleConfig(){
       if(r.ok){
         const cfg=await r.json();
         if(typeof cfg.url==='string'&&/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test(cfg.url)&&typeof cfg.key==='string'&&cfg.key){
-          googleWrite(GOOGLE_URL_STORE,cfg.url);
-          googleWrite(GOOGLE_KEY_STORE,cfg.key);
+          if(googleWrite(GOOGLE_URL_STORE,cfg.url)&&googleWrite(GOOGLE_KEY_STORE,cfg.key)){
+            // The built-in connection is automatic; do not expose its fields on the start screen.
+            $('googleSettings').classList.add('hidden');
+          }
         }
       }
     }catch(e){console.warn('Beépített Google konfiguráció nincs; a mentett beállításokat használjuk.')}
