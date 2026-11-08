@@ -43,6 +43,12 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
     <div><label>Futamok (csoportok) száma</label><div class="step"><button class="s" onclick="setF(-1)">−</button><b id="nf">1</b><button class="s" onclick="setF(1)">+</button></div></div>
     <div><label>Dátum</label><input type="date" id="datum"></div>
   </div>
+  <div class="g2" style="margin-top:10px">
+    <div><label for="locationChoice">Korábbi helyszín</label><select id="locationChoice" onchange="chooseLocation()"><option value="">Új helyszín megadása</option></select></div>
+    <div><label for="location">Helyszín</label><input id="location" type="text" maxlength="200" placeholder="Helyszín megadása"></div>
+  </div>
+  <label for="eventType" style="margin-top:10px">Esemény típusa</label>
+  <select id="eventType"><option value="verseny">Verseny</option><option value="gyakorlas">Gyakorlás</option></select>
   <div id="groups"></div>
   <label style="margin-top:12px">Mód</label>
   <div class="g2"><button class="m on" id="m-both" onclick="setMode('both')">Gyakorló + Éles futam</button><button class="m" id="m-eles" onclick="setMode('eles')">Csak éles futam</button></div>
@@ -104,6 +110,7 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
 
 <script>
 const GK=3,EK=9;
+let eventLocation='',eventType='verseny',completedHeats=new Set();
 let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]},autoSentForRun=false,googleCurrentEventId=null,googleLastSignature=null;
 const $=id=>document.getElementById(id),f2=x=>x.toFixed(2),eq=(a,b)=>Math.abs(a-b)<1e-9;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -147,15 +154,20 @@ function makeGooglePayload(){
       const hasResult=F.D.eles.some(R=>R&&R[c])||F.D.gyak.some(R=>R&&R[c]);
       if(!hasResult)return;
       const t=tot(c,F.D);
-      results.push({name:String(name||('Versenyző '+(c+1))).trim(),heat:idx+1,points:t.pp,totalTime:Number(t.ii)||0,result:Number(t.s)||0});
+      const rounds=[];
+      ['gyak','eles'].forEach(phase=>F.D[phase].forEach((row,round)=>{
+        const entry=row&&row[c];
+        if(entry)rounds.push({phase,round:round+1,points:entry.p,time:entry.i,result:entry.r,valid:!!entry.v});
+      }));
+      results.push({name:String(name||('Versenyző '+(c+1))).trim(),heat:idx+1,points:t.pp,totalTime:Number(t.ii)||0,result:Number(t.s)||0,rounds});
     });
   });
-  return {eventId,revisionId:now.getTime()+'-'+Math.random().toString(36).slice(2,9),date:$('datum').value||now.toISOString().slice(0,10),mode:mode,usedTime:!!useTime,createdAt:now.toISOString(),results};
+  return {schemaVersion:2,eventId,revisionId:now.getTime()+'-'+Math.random().toString(36).slice(2,9),date:$('datum').value||now.toISOString().slice(0,10),mode:mode,location:eventLocation,eventType,usedTime:!!useTime,createdAt:now.toISOString(),results};
 }
 function queueGoogleCompetition(){
   const payload=makeGooglePayload();
   if(!payload.results.length)return;
-  const signature=JSON.stringify([payload.date,payload.mode,payload.usedTime,payload.results]);
+  const signature=JSON.stringify([payload.date,payload.mode,payload.location,payload.eventType,payload.usedTime,payload.results]);
   if(autoSentForRun && signature===googleLastSignature)return;
   const q=googleQueue();
   q.push(payload);
@@ -191,7 +203,7 @@ async function enqueueGoogleResult(url,key,payload){
       response=await res.json();
     }finally{clearTimeout(timer)}
   }
-  if(!response || response.ok!==true || response.eventId!==payload.eventId)throw new Error('unconfirmed');
+  if(!response || response.ok!==true || response.eventId!==payload.eventId || (payload.schemaVersion===2 && response.schemaVersion!==2))throw new Error('unconfirmed');
 }
 async function drainGoogleQueue(){
   if(googleDrainBusy)return;
@@ -225,6 +237,16 @@ window.addEventListener('pageshow',drainGoogleQueue);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')drainGoogleQueue()});
 setInterval(drainGoogleQueue,30000);
 
+const LOCATION_STORE='eredmenyBeiroLocationsV1';
+function savedLocations(){try{const a=JSON.parse(localStorage.getItem(LOCATION_STORE)||'[]');return Array.isArray(a)?a.filter(v=>typeof v==='string'&&v.trim()).slice(0,50):[]}catch(e){return []}}
+function drawLocations(){
+  const select=$('locationChoice');select.replaceChildren();
+  const first=document.createElement('option');first.value='';first.textContent='Új helyszín megadása';select.appendChild(first);
+  savedLocations().forEach(value=>{const o=document.createElement('option');o.value=value;o.textContent=value;select.appendChild(o)});
+}
+function chooseLocation(){if($('locationChoice').value)$('location').value=$('locationChoice').value}
+function rememberLocation(value){if(!value)return;try{localStorage.setItem(LOCATION_STORE,JSON.stringify([value,...savedLocations().filter(v=>v.toLocaleLowerCase()!==value.toLocaleLowerCase())].slice(0,50)))}catch(e){}}
+drawLocations();
 function drawSetup(){
   const old=FN.map((n,f)=>[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value));
   $('nf').textContent=FN.length;
@@ -242,6 +264,7 @@ drawSetup();
 
 function show(id){['setup','run','done'].forEach(s=>$(s).classList.toggle('hidden',s!=id))}
 function start(){
+  eventLocation=$('location').value.trim();eventType=$('eventType').value==='gyakorlas'?'gyakorlas':'verseny';completedHeats=new Set();rememberLocation(eventLocation);drawLocations();
   sensorNewCompetition();
   autoSentForRun=false;googleCurrentEventId=null;googleLastSignature=null;
   futams=FN.map((n,f)=>({names:[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value.trim()),D:{gyak:[],eles:[]}}));
@@ -323,14 +346,14 @@ function go(d){
   } else if(!sensorReviewMode) sensorRelease();
   if(d>0){
     if(ci<names.length-1)ci++;
-    else{ci=0;if(ri<mx()-1)ri++;else if(ph=='gyak'&&mode=='both'){ph='eles';ri=0}else return finish()}
+    else{ci=0;if(ri<mx()-1)ri++;else if(ph=='gyak'&&mode=='both'){ph='eles';ri=0}else return finish(true)}
   }else if(ci>0)ci--;
   else if(ri>0){ri--;ci=names.length-1}
   else if(ph=='eles'&&mode=='both'){ph='gyak';ri=GK-1;ci=names.length-1}
   if(d>0 && sensorReviewMode && sensorReviewOrigin && fi===sensorReviewOrigin.fi && ph===sensorReviewOrigin.ph && ri===sensorReviewOrigin.ri && ci===sensorReviewOrigin.ci){sensorReviewMode=false;sensorReviewOrigin=null;}
   render();
 }
-function finish(){
+function finish(completed=false){
   if(sensorMeasurement && sensorMeasurement.state==='running'){alert('Az időmérés még folyamatban van. Várd meg a végét.');return;}
   const incomplete=futams.some(F=>['gyak','eles'].some(phase=>F.D[phase].some(row=>row && row.some(entry=>entry && entry.partial))));
   if(incomplete){alert('Van még hiányos pont vagy idő. Lépj vissza, és egészítsd ki a befejezés előtt.');return;}
@@ -360,7 +383,7 @@ function finish(){
   if(multi)O.push(['eachAll',`👥 Minden futam minden versenyzője külön (${futams.filter(played).reduce((a,F)=>a+F.names.length,0)} kép)`]);
   rk.forEach(r=>O.push([r.c,`${r.pl}. ${nm(r.c)}${multi?` (${fi+1}. futam)`:''}`]));
   $('who').innerHTML=O.map(o=>`<option value="${o[0]}">${esc(o[1])}</option>`).join('');
-  if(fi===futams.length-1)queueGoogleCompetition();
+  if(completed){completedHeats.add(fi);if(completedHeats.size===futams.length)queueGoogleCompetition();}
 }
 function pickF(){load(+$('fsel').value);finish()}
 function nextF(){load(fi+1);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render()}
@@ -378,7 +401,7 @@ function img(list,head,sub){
   const T=(t,px,py,font,col,al)=>{x.font=font+' '+F;x.fillStyle=col;x.textAlign=al||'left';x.fillText(t,px,py)};
   x.fillStyle='#0f0f1a';x.fillRect(0,0,W,H);
   T(head||'Eredménytáblázat',m,52,'bold 34px','#00d4aa');
-  T(`${sub===undefined?fpre():sub}${$('datum').value||''} · ${both?'Gyakorló + Éles futam':'Csak éles futam'} · ${rk.length} versenyző${useTime?'':' · csak pont'}`,m,90,'20px','#aaa');
+  T(`${sub===undefined?fpre():sub}${$('datum').value||''}${eventLocation?' · '+eventLocation:''} · ${eventType==='gyakorlas'?'Gyakorlás':'Verseny'} · ${both?'Gyakorló + Éles futam':'Csak éles futam'} · ${rk.length} versenyző${useTime?'':' · csak pont'}`,m,90,'20px','#aaa');
   const tx=m+pw+nw+cols.length*cw;
   let y=110;
   x.fillStyle='#252540';x.fillRect(m,y,W-2*m,rh);
@@ -496,7 +519,7 @@ function sumWs(rows,showFut){
 function riderAoa(c){
   const me=ranking().find(r=>r.c==c),a=[];
   a.push([nm(c)]);
-  a.push([`${fpre()}${$('datum').value||''} · ${mode=='both'?'Gyakorló + Éles futam':'Csak éles futam'}`]);
+  a.push([`${fpre()}${$('datum').value||''}${eventLocation?' · '+eventLocation:''} · ${eventType==='gyakorlas'?'Gyakorlás':'Verseny'} · ${mode=='both'?'Gyakorló + Éles futam':'Csak éles futam'}`]);
   a.push([`${me.pl}. hely a(z) ${names.length} versenyzőből`]);a.push([]);
   a.push(useTime?['Szakasz','Kör','Pont','Idő','Rész','Göngyölt']:['Szakasz','Kör','Pont','Göngyölt']);
   const secs=[];if(mode=='both')secs.push(['Gyakorló','gyak',GK]);secs.push(['Éles','eles',EK]);

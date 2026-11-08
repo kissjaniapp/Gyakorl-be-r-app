@@ -194,7 +194,7 @@ public class GoogleSyncPlugin extends Plugin {
                         while((n=in.read(buf))!=-1) {bytes.write(buf,0,n); if(bytes.size()>65536)return false;}
                     }
                     JSONObject response=new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
-                    return response.optBoolean("ok",false) && eventId.equals(response.optString("eventId"));
+                    return response.optBoolean("ok",false) && eventId.equals(response.optString("eventId")) && (payload.optInt("schemaVersion", 1) != 2 || response.optInt("schemaVersion", 0) == 2);
                 } finally {c.disconnect();}
             }
             return false;
