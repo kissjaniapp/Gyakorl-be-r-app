@@ -68,13 +68,14 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
       <b>⏱ Érzékelős időmérés</b>
       <div class="mu" style="margin-top:6px">Csatlakozz a telefonon a kártya Wi-Fi hálózatához. Első jel: rajt; második jel: cél.</div>
       <div class="row">
-        <button class="n" type="button" id="sensorArm" onclick="sensorStart()">Mérés előkészítése</button>
+        
         <button class="s hidden" type="button" id="sensorRetry" onclick="sensorCheck()">Kapcsolat újrapróbálása</button>
       </div>
       <div id="sensorStatus" role="status" aria-live="polite" class="mu">Még nincs előkészített mérés.</div>
       <div id="sensorTarget" class="mu" style="margin-top:4px"></div>
       <div id="sensorValue" style="font-size:1.4rem;font-weight:700;margin-top:4px"></div>
-      <button class="s hidden" type="button" id="sensorUse" onclick="sensorApply(true)">Mért idő átvétele</button>
+      <button class="s hidden" type="button" id="sensorUse" onclick="sensorApply(true)">Várakozó idő átvétele</button>
+      <button class="s hidden" type="button" id="sensorDiscard" onclick="sensorDiscard()">Várakozó idő elvetése</button>
     </div>
     <div class="row"><button class="s" id="bb" onclick="go(-1)">← Vissza</button><button class="n" id="bn" onclick="go(1)">Következő →</button></div>
   </div>
@@ -235,20 +236,20 @@ function render(){
   const more=ri<mx()-1||(g&&mode=='both');
   const hint=!last?`Következő: ${nm(ci+1)}`:more?`Utána új kör: ${nm(0)} indul`:'Ő az utolsó';
   $('rows').innerHTML=`<div class="rw"><div class="${useTime?'g2':''}">
-    <div><label>Pont</label><input type="number" class="ip" step="1" inputmode="numeric" placeholder="0" value="${e?e.p:''}"></div>
-    ${useTime?(ios?`<div><label>Megtakarított idő</label><div style="display:flex;gap:6px"><button class="s" style="flex:0 0 52px;min-width:0;padding:0" onclick="flipSign()">±</button><input type="text" class="ip" inputmode="decimal" placeholder="0.00" value="${e?e.i:''}"></div></div>`:`<div><label>Megtakarított idő</label><input type="number" class="ip" step="0.01" inputmode="decimal" placeholder="0.00" value="${e?e.i:''}"></div>`):''}</div>
+    <div><label>Pont</label><input type="number" class="ip" step="1" inputmode="numeric" placeholder="0" value="${e && e.p!==null?e.p:''}"></div>
+    ${useTime?(ios?`<div><label>Megtakarított idő</label><div style="display:flex;gap:6px"><button class="s" style="flex:0 0 52px;min-width:0;padding:0" onclick="flipSign()">±</button><input type="text" class="ip" inputmode="decimal" placeholder="0.00" value="${e && e.i!==null?e.i:''}"></div></div>`:`<div><label>Megtakarított idő</label><input type="number" class="ip" step="0.01" inputmode="decimal" placeholder="0.00" value="${e && e.i!==null?e.i:''}"></div>`):''}</div>
     <div class="lv" id="lv"></div></div><div class="mu" style="text-align:center;margin-bottom:8px">${esc(hint)}</div>`;
   $('bb').style.visibility=(ri==0&&ci==0&&(g||mode=='eles'))?'hidden':'visible';
   $('bn').textContent=!last?'Következő versenyző →':(!g&&ri==EK-1)?'Befejezés ✓':g&&ri==GK-1?'Éles futam →':'Következő kör →';
-  refresh();sensorUpdateUI();window.scrollTo(0,0);document.querySelector('.ip').focus();
+  refresh();sensorUpdateUI();sensorAutoArm();window.scrollTo(0,0);document.querySelector('.ip').focus();
 }
 function sync(){
   const ips=document.querySelectorAll('.ip'),p=num(ips[0].value),i=useTime?num(ips[1].value):0,R=D[ph][ri]||[];
-  R[ci]=p!==null&&i!==null?calc(p,i,ph=='gyak'):null;D[ph][ri]=R;
+  R[ci]=p!==null&&i!==null?calc(p,i,ph=='gyak'):(p!==null || (useTime && i!==null) ? {p,i,r:0,v:false,partial:true} : null);D[ph][ri]=R;
 }
 function refresh(){
   const g=ph=='gyak',e=(D[ph][ri]||[])[ci];
-  $('lv').innerHTML=e?`${useTime?`Rész <b>${f2(e.r)}</b> · `:''}<span class="${e.v?'ok':'bad'}">${e.v?'Érvényes':'Kifutott'}</span> · Göngy. <b>${f2(cum(ph,ci,ri).s)}</b>`:'–';
+  $('lv').innerHTML=e && e.partial?'Pont vagy idő még hiányzik':e?`${useTime?`Rész <b>${f2(e.r)}</b> · `:''}<span class="${e.v?'ok':'bad'}">${e.v?'Érvényes':'Kifutott'}</span> · Göngy. <b>${f2(cum(ph,ci,ri).s)}</b>`:'–';
   $('rt').textContent=g?'Gyakorló állás':'Éles állás';
   $('rh').innerHTML=`<tr><th>#</th><th>Név</th><th>Göngy.</th>${g?'':`<th>Átlagod, ha így lősz továbbra is</th>`}</tr>`;
   const a=names.map((_,c)=>{const q=cum(ph,c,ri);return{c,s:q.s,n:q.n}}).sort((x,y)=>y.s-x.s);
@@ -269,10 +270,10 @@ function go(d){
   const ips=[...document.querySelectorAll('.ip')];
   if(d>0){
     const a=num(ips[0].value)!==null,b=useTime?num(ips[1].value)!==null:a;
-    if(a!==b){alert('Írd be a pontot és az időt is!');(a?ips[1]:ips[0]).focus();return}
-    if(!a&&!confirm(`${nm(ci)}: nincs adat. Kihagyod?`))return;
+    if(!a&&!b&&!confirm(`${nm(ci)}: nincs adat. Kihagyod?`))return;
   }
   sync();
+  if(sensorMeasurement && sensorMeasurement.state!=='finished')sensorMeasurement.review=true;
   if(d>0){
     if(ci<names.length-1)ci++;
     else{ci=0;if(ri<mx()-1)ri++;else if(ph=='gyak'&&mode=='both'){ph='eles';ri=0}else return finish()}
@@ -282,6 +283,10 @@ function go(d){
   render();
 }
 function finish(){
+  if(sensorPending.length){alert('Van még át nem vett mért idő. Rendeld hozzá a megfelelő versenyzőhöz a befejezés előtt.');return;}
+  if(sensorMeasurement && sensorMeasurement.state==='running'){alert('Az időmérés még folyamatban van. Várd meg a végét.');return;}
+  const incomplete=futams.some(F=>['gyak','eles'].some(phase=>F.D[phase].some(row=>row && row.some(entry=>entry && entry.partial))));
+  if(incomplete){alert('Van még hiányos pont vagy idő. Lépj vissza, és egészítsd ki a befejezés előtt.');return;}
   show('done');window.scrollTo(0,0);
   $('fbox').classList.toggle('hidden',futams.length<2);
   $('fsel').innerHTML=futams.map((_,k)=>`<option value="${k}"${k==fi?' selected':''}>${k+1}. futam</option>`).join('');
@@ -546,7 +551,8 @@ function imgOne(c){
 
 /* Egyérzékelős időmérő: az ESP méri az időt, a telefon csak megjelenít. */
 const SENSOR_URL='http://192.168.4.1';
-let sensorMeasurement=null, sensorTimer=null, sensorGeneration=0, sensorBusy=false;
+let sensorMeasurement=null, sensorTimer=null, sensorGeneration=0, sensorBusy=false, sensorPending=[];
+let sensorCursorBoot=null, sensorCursorSeq=0;
 function sensorFormatMs(ms){
   const centiseconds=Math.floor((Math.abs(ms)+5)/10);
   const sign=ms<0 && centiseconds ? '-' : '';
@@ -568,15 +574,18 @@ function sensorUpdateUI(){
   if(!panel)return;
   panel.classList.toggle('hidden',!useTime);
   const m=sensorMeasurement;
-  $('sensorArm').disabled=sensorBusy || !!(m && (m.state==='running'||m.state==='connecting'));
   $('sensorRetry').classList.toggle('hidden',!m || !m.error);
-  $('sensorUse').classList.toggle('hidden',!m || m.state!=='finished' || m.applied || !sensorSameTarget(m));
-  $('sensorTarget').textContent=m ? m.target : '';
+  $('sensorRetry').textContent=m && (m.state==='error'||m.state==='lost')?'Új mérés indítása':'Kapcsolat újrapróbálása';
+  $('sensorUse').classList.toggle('hidden',sensorPending.length===0);
+  $('sensorDiscard').classList.toggle('hidden',sensorPending.length===0);
+  $('sensorUse').textContent=sensorPending.length?'Várakozó idő átvétele: '+sensorFormatMs(sensorPending[0].resultMs)+' mp ('+sensorPending.length+')':'Várakozó idő átvétele';
+  $('sensorTarget').textContent=m ? (m.review?'Az előző versenyzőnél indult mérés; az eredményt kézzel kell hozzárendelni.':m.target) : '';
   $('sensorValue').textContent=m && Number.isFinite(m.resultMs) ?
     sensorFormatMs(m.resultMs)+' mp' : m && m.state==='running' && Number.isFinite(m.remainingMs) ?
     sensorFormatMs(m.remainingMs)+' mp' : '';
-  if(!m){$('sensorStatus').textContent='Még nincs előkészített mérés.';return}
+  if(!m){$('sensorStatus').textContent='Automatikus előkészítés…';return}
   if(m.error){$('sensorStatus').textContent=m.error;return}
+  if(m.warning){$('sensorStatus').textContent=m.warning;return}
   const labels={connecting:'Kapcsolódás a kártyához…',armed:'Kész: várja az első érzékelőjelet.',
     running:'Mérés folyamatban. A második jel megállítja.',
     finished:m.applied?'A mért idő bekerült a mezőbe.':
@@ -599,101 +608,142 @@ async function sensorGet(path){
     return await response.json();
   } finally {clearTimeout(timer)}
 }
-function sensorSchedule(m){
+
+function sensorSchedule(m,delay=350){
   clearTimeout(sensorTimer);
-  if(sensorMeasurement===m && m.state!=='finished')sensorTimer=setTimeout(()=>sensorPoll(m),350);
+  if(sensorMeasurement===m)sensorTimer=setTimeout(()=>sensorPoll(m),delay);
 }
-async function sensorStart(){
-  if(sensorBusy || !useTime)return;
-  if(sensorMeasurement && !sensorMeasurement.applied &&
-     !confirm('Az előző mérés még nincs átvéve. Új mérést készítesz elő?'))return;
+function sensorAutoArm(){
+  if(!useTime || $('run').classList.contains('hidden') || sensorBusy || sensorMeasurement)return;
   const m={
-    token:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,10),
-    generation:sensorGeneration,fi,ph,ri,ci,state:'connecting',error:'',
+    generation:sensorGeneration,fi,ph,ri,ci,state:'connecting',error:'',review:false,
     target:fpre()+(ph==='gyak'?'Gyakorló':'Éles')+' · '+(ri+1)+'. kör · '+nm(ci),
-    resultMs:null,applied:false
+    bootId:null,lastSeq:0,initial:true,remainingMs:null
   };
-  clearTimeout(sensorTimer);
-  sensorMeasurement=m;
-  await sensorArmDevice(m);
+  clearTimeout(sensorTimer);sensorMeasurement=m;sensorArmDevice(m);
 }
 async function sensorArmDevice(m){
   if(sensorMeasurement!==m || sensorBusy)return;
   sensorBusy=true;m.error='';sensorUpdateUI();
   try {
-    const data=await sensorGet('/arm?token='+encodeURIComponent(m.token));
+    const data=await sensorGet('/continuous?enabled=1');
     if(sensorMeasurement!==m)return;
-    if(data.token!==m.token || !['armed','running','finished'].includes(data.state))
-      throw new Error('A kártya nem igazolta a mérést.');
-    sensorBusy=false;
-    sensorProcess(m,data);
-  } catch(e) {
+    if(typeof data.boot_id!=='string' || !data.continuous)throw new Error('A kártya nem igazolta a folyamatos módot.');
+    m.bootId=data.boot_id;m.state=data.state;
+    if(sensorCursorBoot===m.bootId){m.lastSeq=sensorCursorSeq;m.initial=false;}
+    else {
+      if(!Number.isInteger(data.last_seq)||data.last_seq<0)throw new Error('Hiányzó mérési sorszám.');
+      sensorCursorBoot=m.bootId;sensorCursorSeq=data.last_seq;m.lastSeq=data.last_seq;m.initial=false;
+    }
+    sensorBusy=false;sensorUpdateUI();sensorPoll(m);
+  } catch(e){
     if(sensorMeasurement!==m)return;
     sensorBusy=false;
-    m.error='Nem sikerült előkészíteni. Ellenőrizd a kártya Wi-Fi kapcsolatát, majd próbáld újra.';
-    sensorUpdateUI();
+    m.error='Nem érhető el az érzékelő. Csatlakozz a kártya Wi-Fi hálózatához; az újrapróbálás automatikus.';
+    sensorUpdateUI();sensorTimer=setTimeout(()=>sensorArmDevice(m),3000);
   }
 }
 async function sensorPoll(m){
   if(sensorMeasurement!==m || sensorBusy)return;
   sensorBusy=true;
   try {
-    const data=await sensorGet('/status');
+    const status=await sensorGet('/status');
     if(sensorMeasurement!==m)return;
-    if(data.token!==m.token)throw new Error('Másik mérés vagy újraindult kártya.');
-    sensorBusy=false;m.error='';
-    sensorProcess(m,data);
+    if(status.boot_id!==m.bootId){
+      sensorBusy=false;m.state='lost';
+      m.error='A kártya újraindult: a még át nem küldött mérések elveszhettek. Indíts új mérést.';
+      clearTimeout(sensorTimer);sensorUpdateUI();return;
+    }
+    const batch=await sensorGet('/events?after='+encodeURIComponent(m.lastSeq));
+    if(sensorMeasurement!==m)return;
+    if(batch.boot_id!==m.bootId){
+      sensorBusy=false;m.state='lost';
+      m.error='A kártya újraindult: a még át nem küldött mérések elveszhettek. Indíts új mérést.';
+      clearTimeout(sensorTimer);sensorUpdateUI();return;
+    }
+    if(!Array.isArray(batch.events))throw new Error('Érvénytelen eseménylista.');
+    if(batch.overflow){
+      m.warning='Az érzékelő tárhelye megtelt: egy vagy több régi mérés elveszett. Ellenőrizd az eredményeket.';
+    }
+    const events=batch.events.slice().sort((a,b)=>a.seq-b.seq);
+    for(let index=0;index<events.length;index++){
+      const event=events[index];
+      if(!Number.isInteger(event.seq)||event.seq<=m.lastSeq||!Number.isFinite(event.result_ms)||!Number.isFinite(event.elapsed_ms))
+        throw new Error('Érvénytelen mérés.');
+      const input=!m.initial && index===0 && sensorSameTarget(m) && !m.review ? document.querySelectorAll('#rows .ip')[1] : null;
+      if(input && input.value.trim()===''){
+        input.value=sensorFormatMs(event.result_ms);
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      } else {
+        sensorPending.push({resultMs:event.result_ms,target:m.target,seq:event.seq});
+      }
+      m.lastSeq=event.seq;sensorCursorBoot=m.bootId;sensorCursorSeq=m.lastSeq;
+      // Later events in the same response cannot be safely assigned automatically.
+    }
+    m.initial=false;
+    if(events.length){
+      m.fi=fi;m.ph=ph;m.ri=ri;m.ci=ci;m.generation=sensorGeneration;m.review=false;
+      m.target=fpre()+(ph==='gyak'?'Gyakorló':'Éles')+' · '+(ri+1)+'. kör · '+nm(ci);
+    }
+    m.state=status.state;m.remainingMs=status.remaining_ms;
+    if(status.state==='error'){
+      m.error='Érzékelési hiba: a mérés nem használható. Indíts új mérést.';
+      sensorBusy=false;clearTimeout(sensorTimer);sensorUpdateUI();return;
+    }
+    m.error='';sensorBusy=false;sensorUpdateUI();sensorSchedule(m);
   } catch(e){
     if(sensorMeasurement!==m)return;
     sensorBusy=false;
-    m.error='Megszakadt a kapcsolat vagy megváltozott a mérés. Ellenőrizd a Wi-Fi-t és próbáld újra.';
-    sensorUpdateUI();
+    m.error='A kapcsolat megszakadt. A kártya gyűjti a méréseket; az újrakapcsolódás automatikus.';
+    sensorUpdateUI();sensorSchedule(m,3000);
   }
-}
-function sensorProcess(m,data){
-  if(data.state==='error'){
-    m.state='error';
-    m.error='Érzékelési hiba: ez a mérés nem használható. Indíts új mérést.';
-    clearTimeout(sensorTimer);sensorUpdateUI();return;
-  }
-  if(!['armed','running','finished'].includes(data.state)){
-    m.error='A kártya állapota nem egyezik. Ellenőrizd a mérést.';
-    sensorUpdateUI();return;
-  }
-  m.state=data.state;
-  if(m.state==='finished'){
-    if(!Number.isFinite(data.result_ms) || !Number.isFinite(data.elapsed_ms)){
-      m.error='A kártya hibás időadatot küldött.';sensorUpdateUI();return;
-    }
-    m.resultMs=data.result_ms;
-    if(sensorSameTarget(m)){
-      const input=document.querySelectorAll('#rows .ip')[1];
-      if(input && input.value.trim()==='')sensorApply(false);
-    }
-  } else if(Number.isFinite(data.remaining_ms)){
-    m.remainingMs=data.remaining_ms;
-  }
-  sensorUpdateUI();
-  sensorSchedule(m);
 }
 function sensorCheck(){
   const m=sensorMeasurement;
   if(!m || sensorBusy)return;
   m.error='';
+  if(m.state==='error'){sensorRecover(m);return;}
+  if(m.state==='lost'){
+    if(!confirm('Az újraindulás előtti át nem küldött mérések elveszhettek. Új időmérést indítasz?'))return;
+    sensorMeasurement=null;sensorAutoArm();return;
+  }
   if(m.state==='connecting')sensorArmDevice(m);
   else sensorPoll(m);
 }
+async function sensorRecover(m){
+  if(sensorBusy || sensorMeasurement!==m)return;
+  sensorBusy=true;
+  try {
+    await sensorGet('/continuous?enabled=0');
+    const data=await sensorGet('/continuous?enabled=1');
+    if(sensorMeasurement!==m)return;
+    if(data.boot_id!==m.bootId || !data.continuous)throw new Error('Újraindult a kártya.');
+    m.state=data.state;m.error='';sensorBusy=false;sensorUpdateUI();sensorPoll(m);
+  } catch(e){
+    if(sensorMeasurement!==m)return;
+    sensorBusy=false;m.error='Nem sikerült újraindítani az érzékelőt. Ellenőrizd a kapcsolatot.';
+    sensorUpdateUI();
+  }
+}
+function sensorDiscard(){
+  if(!sensorPending.length)return;
+  const item=sensorPending[0];
+  if(!confirm('Elveted a várakozó '+sensorFormatMs(item.resultMs)+' mp mérést? Előkészítéskor: '+item.target+'.'))return;
+  sensorPending.shift();sensorUpdateUI();
+}
 function sensorApply(manual){
-  const m=sensorMeasurement;
-  if(!m || m.state!=='finished'|| !sensorSameTarget(m) || !Number.isFinite(m.resultMs))return;
+  if(!sensorPending.length || $('run').classList.contains('hidden') || !useTime)return;
   const input=document.querySelectorAll('#rows .ip')[1];
   if(!input)return;
-  if(input.value.trim()!=='' && (!manual || !confirm('A mezőben már van idő. Felülírod a mért idővel?')))return;
-  input.value=sensorFormatMs(m.resultMs);
-  m.applied=true;
+  if(input.value.trim()!=='' && !confirm('A mezőben már van idő. Felülírod a várakozó mért idővel?'))return;
+  const item=sensorPending[0];
+  if(!confirm('Várakozó idő: '+sensorFormatMs(item.resultMs)+' mp. A mérés előkészítésekor: '+item.target+'. A jelenlegi versenyzőhöz rendeled?'))return;
+  sensorPending.shift();
+  input.value=sensorFormatMs(item.resultMs);
   input.dispatchEvent(new Event('input',{bubbles:true}));
   sensorUpdateUI();
 }
+
 
 initGoogleConfig();
 if(!native&&'serviceWorker' in navigator&&location.protocol.indexOf('http')==0)navigator.serviceWorker.register('sw.js').catch(()=>{});
