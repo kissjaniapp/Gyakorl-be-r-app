@@ -16,6 +16,26 @@ jobs:
           java-version: 17
       - name: www mappa elokeszitese
         run: mkdir -p www && cp index.html xlsx.full.min.js www/
+      - name: Google konfiguracio beepitese APK-ba (ha elerheto)
+        env:
+          GOOGLE_WEBAPP_URL: ${{ secrets.GOOGLE_WEBAPP_URL }}
+          GOOGLE_SHARED_KEY: ${{ secrets.GOOGLE_SHARED_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+          url = os.environ.get('GOOGLE_WEBAPP_URL', '').strip()
+          key = os.environ.get('GOOGLE_SHARED_KEY', '').strip()
+          if url and key:
+              if not re.fullmatch(r'https://script\.google\.com/macros/s/.+/exec(?:\?.*)?', url):
+                  sys.exit('Invalid GOOGLE_WEBAPP_URL: expected Google Apps Script /exec HTTPS URL')
+              with open('www/google-config.json', 'w', encoding='utf-8') as f:
+                  json.dump({'url': url, 'key': key}, f)
+              print('Google config embedded in APK (contents hidden).')
+          elif url or key:
+              sys.exit('Both GOOGLE_WEBAPP_URL and GOOGLE_SHARED_KEY must be present.')
+          else:
+              print('::notice title=Google beallitas hianyzik::Set both repository Actions secrets for automatic APK config; manual setup remains available.')
+          PY
       - run: npm install
       - run: npx cap add android
       - name: Mento kod beepitese
