@@ -18,6 +18,19 @@ jobs:
         run: mkdir -p www && cp index.html xlsx.full.min.js www/
       - run: npm install
       - run: npx cap add android
+      - name: Engedelyezzuk az ESP helyi kapcsolatot
+        run: |
+          mkdir -p android/app/src/main/res/xml
+          cp network_security_config.xml android/app/src/main/res/xml/network_security_config.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text(encoding='utf-8')
+          if '<application' not in text:
+              raise RuntimeError('Az Android application elem nem talalhato')
+          text = text.replace('<application', '<application android:networkSecurityConfig="@xml/network_security_config"', 1)
+          manifest.write_text(text, encoding='utf-8')
+          PY
       - name: Mento kod beepitese
         run: |
           D=$(dirname $(find android/app/src/main/java -name MainActivity.java))
@@ -57,3 +70,4 @@ jobs:
         with:
           name: Eredmenytablazat-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
