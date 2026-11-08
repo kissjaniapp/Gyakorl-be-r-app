@@ -121,7 +121,7 @@ const GOOGLE_QUEUE_STORE='eredmenyBeiroGoogleQueueV1';
 const googleRead=(k,d='')=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
 const googleWrite=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){return false}};
 function initGoogleConfig(){
-  $('googleUrl').value=googleRead(GOOGLE_URL_STORE);
+  $('googleUrl').value=googleRead(GOOGLE_URL_STORE) || 'https://script.google.com/macros/s/AKfycbxdGqV7kMA_crnm7DABUSTFarmXddiX1m-paOouDoaNljwYgVA9wDRpJNsmkyZM65ntlg/exec';
   $('googleKey').value=googleRead(GOOGLE_KEY_STORE);
   drainGoogleQueue();
 }
