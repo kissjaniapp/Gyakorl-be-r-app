@@ -203,6 +203,7 @@ async function enqueueGoogleResult(url,key,payload){
       response=await res.json();
     }finally{clearTimeout(timer)}
   }
+  if(response && response.stale===true && response.eventId===payload.eventId)throw new Error('stale');
   if(!response || response.ok!==true || response.eventId!==payload.eventId || (payload.schemaVersion===2 && response.schemaVersion!==2))throw new Error('unconfirmed');
 }
 async function drainGoogleQueue(){
@@ -220,7 +221,13 @@ async function drainGoogleQueue(){
     while(true){
       const before=googleQueue(),payload=before[0];
       if(!payload)return;
-      await enqueueGoogleResult(url,key,payload);
+      try{await enqueueGoogleResult(url,key,payload)}catch(e){
+        if(e && e.message==='stale'){
+          const key='eredmenyBeiroGoogleConflictsV1';
+          let conflicts;try{conflicts=JSON.parse(googleRead(key,'[]'));if(!Array.isArray(conflicts))throw 0}catch(_){throw e}
+          conflicts.push(payload);if(!googleWrite(key,JSON.stringify(conflicts)))throw e;
+        }else throw e;
+      }
       // Reread the queue: another competition may have finished while sending.
       const current=googleQueue();
       const index=current.findIndex(item=>item.eventId===payload.eventId && item.revisionId===payload.revisionId);

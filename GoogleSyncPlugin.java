@@ -141,7 +141,19 @@ public class GoogleSyncPlugin extends Plugin {
                 JSONObject payload=job.getJSONObject("payload");
                 String eventId=payload.getString("eventId");
                 payload.put("secret",secret);
-                if (!postAndVerify(endpoint,payload,eventId)) return Result.retry();
+                int delivery=postAndVerify(endpoint,payload,eventId);
+                if (delivery==2) {
+                    // Keep a durable separate copy; do not retry a known conflict forever.
+                    synchronized (GoogleSyncPlugin.class) {
+                        File conflict = File.createTempFile("sheet_conflict_", ".json", getApplicationContext().getFilesDir());
+                        try (FileOutputStream out = new FileOutputStream(conflict)) {
+                            out.write(job.toString().getBytes(StandardCharsets.UTF_8));
+                            out.getFD().sync();
+                        }
+                    }
+                    return Result.failure();
+                }
+                if (delivery!=1) return Result.retry();
                 synchronized (GoogleSyncPlugin.class) {
                     if (!file.exists()) return Result.success();
                     // A newer edit to this competition must also reach the server.
@@ -162,12 +174,12 @@ public class GoogleSyncPlugin extends Plugin {
             }
             return new JSONObject(new String(body.toByteArray(), StandardCharsets.UTF_8));
         }
-        private boolean postAndVerify(String endpoint, JSONObject payload, String eventId) throws Exception {
+        private int postAndVerify(String endpoint, JSONObject payload, String eventId) throws Exception {
             URL url = new URL(endpoint);
             boolean post = true;
             byte[] content = payload.toString().getBytes(StandardCharsets.UTF_8);
             for (int i=0; i<6; i++) {
-                if (!isTrustedRedirect(url)) return false;
+                if (!isTrustedRedirect(url)) return 0;
                 HttpURLConnection c = (HttpURLConnection) url.openConnection();
                 try {
                     c.setInstanceFollowRedirects(false);
@@ -182,22 +194,24 @@ public class GoogleSyncPlugin extends Plugin {
                     int status=c.getResponseCode();
                     if (status==301 || status==302 || status==303 || status==307 || status==308) {
                         String location=c.getHeaderField("Location");
-                        if (location==null) return false;
+                        if (location==null) return 0;
                         url=new URL(url,location);
                         if(status==301 || status==302 || status==303) post=false;
                         continue;
                     }
-                    if (status<200 || status>=300) return false;
+                    if (status<200 || status>=300) return 0;
                     ByteArrayOutputStream bytes=new ByteArrayOutputStream();
                     try (InputStream in=c.getInputStream()) {
                         byte[] buf=new byte[4096]; int n;
-                        while((n=in.read(buf))!=-1) {bytes.write(buf,0,n); if(bytes.size()>65536)return false;}
+                        while((n=in.read(buf))!=-1) {bytes.write(buf,0,n); if(bytes.size()>65536)return 0;}
                     }
                     JSONObject response=new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
-                    return response.optBoolean("ok",false) && eventId.equals(response.optString("eventId")) && (payload.optInt("schemaVersion", 1) != 2 || response.optInt("schemaVersion", 0) == 2);
+                    if (!response.optBoolean("ok",false) || !eventId.equals(response.optString("eventId")) ||
+                        (payload.optInt("schemaVersion", 1)==2 && response.optInt("schemaVersion",0)!=2)) return 0;
+                    return response.optBoolean("stale",false) ? 2 : 1;
                 } finally {c.disconnect();}
             }
-            return false;
+            return 0;
         }
     }
 }
