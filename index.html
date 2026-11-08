@@ -89,7 +89,6 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
     <div class="row" style="margin:0 0 12px"><button class="p hidden" id="bnf" onclick="nextF()" style="padding:16px 10px;font-size:1.1rem">Következő futam →</button></div>
     <div id="fbox" class="hidden" style="margin-bottom:10px"><label>Futam</label><select id="fsel" onchange="pickF()"></select></div>
     <div class="mu" id="ft" style="font-weight:600;margin-bottom:8px">🏆 Végeredmény</div>
-    <div class="mu" id="googleStatus" role="status" aria-live="polite" style="margin-bottom:8px"></div>
     <table><thead><tr><th>#</th><th>Név</th><th>Pont</th><th id="fti">Idő</th><th>Végered.</th></tr></thead><tbody id="fb"></tbody></table>
     <div id="allbox" class="hidden" style="margin-top:16px"><div class="mu" style="font-weight:600;margin-bottom:8px">🏁 Összesített állás – összes futam eddig</div>
     <table><thead id="ah"></thead><tbody id="ab"></tbody></table></div>
@@ -105,7 +104,7 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
 
 <script>
 const GK=3,EK=9;
-let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]},autoSentForRun=false;
+let FN=[4],futams=[],fi=0,names=[],mode='both',ph='gyak',ri=0,ci=0,useTime=true,D={gyak:[],eles:[]},autoSentForRun=false,googleCurrentEventId=null,googleLastSignature=null;
 const $=id=>document.getElementById(id),f2=x=>x.toFixed(2),eq=(a,b)=>Math.abs(a-b)<1e-9;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nm=i=>names[i]||`Versenyző ${i+1}`, mx=()=>ph=='gyak'?GK:EK;
@@ -124,7 +123,7 @@ const googleWrite=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){ret
 function initGoogleConfig(){
   $('googleUrl').value=googleRead(GOOGLE_URL_STORE);
   $('googleKey').value=googleRead(GOOGLE_KEY_STORE);
-  if(navigator.onLine)drainGoogleQueue();
+  drainGoogleQueue();
 }
 function saveGoogleConfig(){
   const url=$('googleUrl').value.trim(),key=$('googleKey').value.trim();
@@ -134,14 +133,13 @@ function saveGoogleConfig(){
   if(!googleWrite(GOOGLE_URL_STORE,url)||!googleWrite(GOOGLE_KEY_STORE,key)){
     alert('A beállításokat nem sikerült elmenteni ezen az eszközön.');return;
   }
-  setGoogleStatus(url&&key?'Google Táblázat beállítva. A küldés automatikus.':'A Google Táblázat nincs teljesen beállítva; az eredmények helyben várakoznak.');
   drainGoogleQueue();
 }
 function googleQueue(){try{return JSON.parse(googleRead(GOOGLE_QUEUE_STORE,'[]'))||[]}catch(e){return []}}
 function saveGoogleQueue(q){return googleWrite(GOOGLE_QUEUE_STORE,JSON.stringify(q))}
-function setGoogleStatus(msg){const el=$('googleStatus');if(el)el.textContent=msg||''}
 function makeGooglePayload(){
-  const now=new Date(),eventId='verseny-'+now.getTime()+'-'+Math.random().toString(36).slice(2,9);
+  const now=new Date();
+  const eventId=googleCurrentEventId || (googleCurrentEventId='verseny-'+now.getTime()+'-'+Math.random().toString(36).slice(2,9));
   const results=[];
   futams.forEach((F,idx)=>{
     if(!played(F))return;
@@ -152,42 +150,80 @@ function makeGooglePayload(){
       results.push({name:String(name||('Versenyző '+(c+1))).trim(),heat:idx+1,points:t.pp,totalTime:Number(t.ii)||0,result:Number(t.s)||0});
     });
   });
-  return {eventId,date:$('datum').value||now.toISOString().slice(0,10),mode:mode,usedTime:!!useTime,createdAt:now.toISOString(),results};
+  return {eventId,revisionId:now.getTime()+'-'+Math.random().toString(36).slice(2,9),date:$('datum').value||now.toISOString().slice(0,10),mode:mode,usedTime:!!useTime,createdAt:now.toISOString(),results};
 }
 function queueGoogleCompetition(){
-  if(autoSentForRun)return;
-  autoSentForRun=true;
   const payload=makeGooglePayload();
-  if(!payload.results.length){setGoogleStatus('Nincs elküldhető eredmény.');return;}
-  const q=googleQueue();q.push(payload);
-  if(!saveGoogleQueue(q)){setGoogleStatus('Nem sikerült elmenteni a küldési sort ezen a telefonon.');return;}
-  if(!googleRead(GOOGLE_URL_STORE)||!googleRead(GOOGLE_KEY_STORE)){
-    setGoogleStatus('Az eredmény várakozik: állítsd be a Google Táblázat URL-jét és kulcsát a kezdőképernyőn.');return;
-  }
-  setGoogleStatus('A versenyeredmények automatikus küldése folyamatban…');
+  if(!payload.results.length)return;
+  const signature=JSON.stringify([payload.date,payload.mode,payload.usedTime,payload.results]);
+  if(autoSentForRun && signature===googleLastSignature)return;
+  const q=googleQueue();
+  q.push(payload);
+  // Never mark queued until local persistence succeeded.
+  if(!saveGoogleQueue(q))return;
+  autoSentForRun=true;
+  googleLastSignature=signature;
   drainGoogleQueue();
 }
 let googleDrainBusy=false;
+async function enqueueGoogleResult(url,key,payload){
+  // Android persists the job before confirming enqueue; its worker retries in the background.
+  const plugin=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.GoogleSync;
+  if(plugin && typeof plugin.enqueue==='function'){
+    const response=await plugin.enqueue({url,secret:key,payload});
+    if(!response || response.ok!==true)throw new Error('queue failed');
+    return;
+  }
+  // A fallback must only remove an item upon a readable, explicit server acknowledgement.
+  // Opaque no-cors fetch responses are intentionally never considered successful.
+  const nativeHttp=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+  let response;
+  if(nativeHttp && typeof nativeHttp.post==='function'){
+    const res=await nativeHttp.post({url,headers:{'Content-Type':'text/plain;charset=UTF-8'},data:JSON.stringify({...payload,secret:key}),connectTimeout:8000,readTimeout:8000});
+    if(!res || res.status<200 || res.status>=300)throw new Error('delivery failed');
+    response=res.data;
+    if(typeof response==='string')response=JSON.parse(response);
+  }else{
+    const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),8000);
+    try{
+      const res=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({...payload,secret:key}),signal:controller.signal});
+      if(!res.ok || res.type==='opaque')throw new Error('unconfirmed');
+      response=await res.json();
+    }finally{clearTimeout(timer)}
+  }
+  if(!response || response.ok!==true || response.eventId!==payload.eventId)throw new Error('unconfirmed');
+}
 async function drainGoogleQueue(){
-  if(googleDrainBusy||!navigator.onLine)return;
+  if(googleDrainBusy)return;
   const url=googleRead(GOOGLE_URL_STORE),key=googleRead(GOOGLE_KEY_STORE);
-  if(!url||!key)return;
   googleDrainBusy=true;
   try{
-    let q=googleQueue();
-    while(q.length&&navigator.onLine){
-      const payload=q[0];
-      // text/plain avoids a CORS preflight; no-cors lets the WebView dispatch to Apps Script.
-      await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({...payload,secret:key})});
-      q.shift();saveGoogleQueue(q);
-      setGoogleStatus(q.length?'Eredmények küldve; további eredmények küldése…':'✅ Az eredmények küldése elindult a Google Táblázat felé.');
+    // Keep all native pending jobs pointed at the latest configured endpoint and key.
+    const plugin=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.GoogleSync;
+    if(plugin && typeof plugin.configure==='function'){
+      const configured=await plugin.configure({url,secret:key});
+      if(!configured || configured.ok!==true)throw new Error('configuration failed');
+    }
+    if(!url||!key)return;
+    while(true){
+      const before=googleQueue(),payload=before[0];
+      if(!payload)return;
+      await enqueueGoogleResult(url,key,payload);
+      // Reread the queue: another competition may have finished while sending.
+      const current=googleQueue();
+      const index=current.findIndex(item=>item.eventId===payload.eventId && item.revisionId===payload.revisionId);
+      if(index<0)continue;
+      current.splice(index,1);
+      if(!saveGoogleQueue(current))return;
     }
   }catch(e){
-    setGoogleStatus('A Google Táblázat nem érhető el. Az eredmények a telefonon várakoznak, és online állapotban újrapróbáljuk.');
+    // Silent retry; the persisted item remains available.
   }finally{googleDrainBusy=false;}
 }
 window.addEventListener('online',drainGoogleQueue);
-window.addEventListener('pageshow',()=>{if(navigator.onLine)drainGoogleQueue()});
+window.addEventListener('pageshow',drainGoogleQueue);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')drainGoogleQueue()});
+setInterval(drainGoogleQueue,30000);
 
 function drawSetup(){
   const old=FN.map((n,f)=>[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value));
@@ -207,7 +243,7 @@ drawSetup();
 function show(id){['setup','run','done'].forEach(s=>$(s).classList.toggle('hidden',s!=id))}
 function start(){
   sensorNewCompetition();
-  autoSentForRun=false;
+  autoSentForRun=false;googleCurrentEventId=null;googleLastSignature=null;
   futams=FN.map((n,f)=>({names:[...document.querySelectorAll(`.nmi[data-f="${f}"]`)].map(e=>e.value.trim()),D:{gyak:[],eles:[]}}));
   load(0);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render();
 }

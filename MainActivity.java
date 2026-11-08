@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(JpegSaverPlugin.class);
+        registerPlugin(GoogleSyncPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

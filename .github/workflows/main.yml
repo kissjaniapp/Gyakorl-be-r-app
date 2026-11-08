@@ -31,10 +31,21 @@ jobs:
           text = text.replace('<application', '<application android:networkSecurityConfig="@xml/network_security_config"', 1)
           manifest.write_text(text, encoding='utf-8')
           PY
+      - name: Hatterbeli szinkron fuggoseg
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle")
+          text = p.read_text(encoding="utf-8")
+          if "dependencies {" not in text:
+              raise RuntimeError("Gradle dependencies block not found")
+          text = text.replace("dependencies {", "dependencies {\n    implementation \"androidx.work:work-runtime:2.9.1\"", 1)
+          p.write_text(text, encoding="utf-8")
+          PY
       - name: Mento kod beepitese
         run: |
           D=$(dirname $(find android/app/src/main/java -name MainActivity.java))
-          cp MainActivity.java JpegSaverPlugin.java "$D/"
+          cp MainActivity.java JpegSaverPlugin.java GoogleSyncPlugin.java "$D/"
       - name: Ikon es nev
         run: |
           python3 -c "import PIL" 2>/dev/null || pip install --break-system-packages pillow
