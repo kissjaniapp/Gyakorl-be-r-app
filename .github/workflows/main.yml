@@ -21,7 +21,9 @@ jobs:
       - name: Gradle letoltesi ido beallitasa
         run: |
           sed -i 's/^networkTimeout=.*/networkTimeout=120000/' android/gradle/wrapper/gradle-wrapper.properties
-          sed -i 's|services.gradle.org/distributions/gradle-8.2.1-all.zip|downloads.gradle.org/distributions/gradle-8.2.1-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          sed -i 's|services.gradle.org/distributions/gradle-8.2.1-all.zip|mirror.math.princeton.edu/pub/macports/distfiles/gradle/gradle-8.2.1-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          sed -i '/^distributionSha256Sum=/d' android/gradle/wrapper/gradle-wrapper.properties
+          echo 'distributionSha256Sum=03ec176d388f2aa99defcadc3ac6adf8dd2bce5145a129659537c0874dea5ad1' >> android/gradle/wrapper/gradle-wrapper.properties
           grep -q '^networkTimeout=' android/gradle/wrapper/gradle-wrapper.properties || echo 'networkTimeout=120000' >> android/gradle/wrapper/gradle-wrapper.properties
       - name: Engedelyezzuk az ESP helyi kapcsolatot
         run: |
