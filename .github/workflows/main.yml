@@ -35,7 +35,12 @@ jobs:
       - name: www mappa elokeszitese
         run: mkdir -p www && cp index.html xlsx.full.min.js www/
       - name: Android idomero teszt
-        run: node test/android-timer.cjs
+        run: |
+          node test/android-timer.cjs
+          node test/android-finish.cjs
+          mkdir -p build-sensor-test
+          javac -d build-sensor-test SensorResponseValidator.java test/SensorResponseValidatorTest.java
+          java -cp build-sensor-test hu.eredmenytablazat.app.SensorResponseValidatorTest
       - run: npm install
       - run: npx cap add android
       - name: Gradle letoltesi ido beallitasa
@@ -74,7 +79,7 @@ jobs:
       - name: Mento kod beepitese
         run: |
           D=$(dirname $(find android/app/src/main/java -name MainActivity.java))
-          cp MainActivity.java JpegSaverPlugin.java GoogleSyncPlugin.java ArduinoSensorPlugin.java "$D/"
+          cp MainActivity.java JpegSaverPlugin.java GoogleSyncPlugin.java ArduinoSensorPlugin.java SensorResponseValidator.java "$D/"
       - name: Ikon es nev
         run: |
           python3 -c "import PIL" 2>/dev/null || pip install --break-system-packages pillow

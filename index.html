@@ -63,13 +63,12 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
   <div class="g2"><button class="m on" id="t-ido" onclick="setTime(true)">Pont + Idő</button><button class="m" id="t-pont" onclick="setTime(false)">Csak pont</button></div>
   <div class="row"><button class="p" onclick="start()">▶ Kezdés</button></div>
   <details style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
-    <summary style="color:var(--ac2);font-weight:700;cursor:pointer">☁️ Google Táblázat automatikus küldés beállítása</summary>
+    <summary style="color:var(--ac2);font-weight:700;cursor:pointer">Kapcsolat beállításai</summary>
     <label style="margin-top:10px">Google Apps Script webalkalmazás URL-je</label>
     <input id="googleUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
     <label style="margin-top:8px">Közös kulcs (ugyanaz, mint a Google Apps Scriptben)</label>
     <input id="googleKey" type="password" placeholder="A Google Apps Scriptben beállított kulcs" autocomplete="off">
     <div class="row"><button class="n" type="button" onclick="saveGoogleConfig()">Beállítások mentése</button></div>
-    <div class="mu" style="margin-top:6px">Ezt egyszer kell beállítani. A verseny végén az eredmények automatikusan mennek a táblázatba; a képes mentés, Excel és Messenger/Viber megosztás változatlan marad.</div>
   </details>
 </div>
 
@@ -679,11 +678,19 @@ function sensorUpdateUI(){
     finished:'Mérés kész. A következő versenyzőig zárolva.'};
   $('sensorStatus').textContent=labels[m.state]||'Várakozás a kártyára…';
 }
-function sensorConnectionUpdate(data){
-  const valid=!!data && typeof data.boot_id==='string' && data.boot_id.length>0 &&
-    ['idle','armed','running','finished','error'].includes(data.state);
+function sensorSetConnection(valid){
   $('sensorConnectionDot').classList.toggle('connected',valid);
   $('sensorConnectionLabel').textContent=valid?'Időmérő kártya: csatlakoztatva':'Időmérő kártya: nem érhető el';
+}
+function sensorConnectionUpdate(data){
+  sensorSetConnection(!!data && typeof data.boot_id==='string' && data.boot_id.length>0 &&
+    ['idle','armed','running','finished','error'].includes(data.state));
+}
+function sensorHttpError(status,data,path){
+  const e=new Error('HTTP '+status);e.status=status;
+  e.sensorConfirmed=status===409 && path.startsWith('/arm?token=') && !!data &&
+    ['measurement_running','previous_not_confirmed'].includes(data.error);
+  return e;
 }
 async function sensorGet(path){
   const url=SENSOR_URL+path;
@@ -693,23 +700,23 @@ async function sensorGet(path){
     const local=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ArduinoSensor;
     if(local && typeof local.get==='function'){
       const response=await local.get({path});
-      if(response.status<200||response.status>=300){const e=new Error('HTTP '+response.status);e.status=response.status;throw e;}
       data=typeof response.data==='string' ? JSON.parse(response.data) : response.data;
+      if(response.status<200||response.status>=300)throw sensorHttpError(response.status,data,path);
     }else if(nativeHttp && typeof nativeHttp.get==='function'){
       const response=await nativeHttp.get({url,connectTimeout:2500,readTimeout:2500});
-      if(response.status<200||response.status>=300){const e=new Error('HTTP '+response.status);e.status=response.status;throw e;}
       data=typeof response.data==='string' ? JSON.parse(response.data) : response.data;
+      if(response.status<200||response.status>=300)throw sensorHttpError(response.status,data,path);
     }else{
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),2500);
       try {
         const response=await fetch(url,{cache:'no-store',signal:controller.signal});
-        if(!response.ok){const e=new Error('HTTP '+response.status);e.status=response.status;throw e;}
         data=await response.json();
+        if(!response.ok)throw sensorHttpError(response.status,data,path);
       } finally {clearTimeout(timer)}
     }
     sensorConnectionUpdate(data);
     return data;
-  }catch(error){sensorConnectionUpdate(null);throw error}
+  }catch(error){sensorSetConnection(!!error.sensorConfirmed);throw error}
 }
 let sensorProbeBusy=false;
 function sensorProbe(){

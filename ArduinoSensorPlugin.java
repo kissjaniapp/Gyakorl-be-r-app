@@ -53,7 +53,7 @@ public class ArduinoSensorPlugin extends Plugin {
                         }
                         JSObject data = new JSObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
                         // Avoid accepting a different device that happens to use the same address.
-                        if (data.optString("boot_id", "").isEmpty() || data.optString("state", "").isEmpty()) continue;
+                        if (!SensorResponseValidator.accepts(status, path, data.optString("boot_id", ""), data.optString("state", ""), data.optString("error", ""))) continue;
                         JSObject result = new JSObject();
                         result.put("status", status); result.put("data", data); call.resolve(result); return;
                     } catch (Exception ignored) {

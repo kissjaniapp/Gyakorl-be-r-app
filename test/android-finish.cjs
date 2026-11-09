@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync('index.html','utf8');
+const finish=html.slice(html.indexOf('function finish(completed=false){'),html.indexOf('function pickF(){'));
+assert.ok(finish);
+const pre="let sensorMeasurement=null,fi=0,mode='both',useTime=true,desk=false,native=false,ios=false,names=['A'],completedHeats=new Set(),calls=0;let futams=[0,1].map(()=>({names:['A'],D:{gyak:[],eles:[]}}));let nodes={};let window={scrollTo(){}};function $(id){return nodes[id]??=({classList:{toggle(){},remove(){}},style:{},innerHTML:'',textContent:''})};function show(){}function alert(){throw Error('unexpected alert')}function ranking(){return []}function allRows(){return []}function played(){return true}function esc(s){return s}function queueGoogleCompetition(){calls++}";
+const check="finish(true);if(calls!==0)throw Error('sent too early');fi=1;finish();if(calls!==0)throw Error('sent during review');finish(true);if(calls!==1)throw Error('did not send once complete');calls;";
+assert.equal(vm.runInNewContext(pre+finish+check),1);
+assert.ok(html.includes('Kapcsolat beállításai'));
+assert.ok(!html.includes('Google Táblázat automatikus küldés beállítása'));
+console.log('Competition is queued only after all heats are complete');

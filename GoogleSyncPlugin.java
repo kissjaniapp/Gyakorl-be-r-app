@@ -151,7 +151,8 @@ public class GoogleSyncPlugin extends Plugin {
                             out.getFD().sync();
                         }
                     }
-                    return Result.failure();
+                    // The conflict is archived, not delivered. Completing this worker allows newer queued jobs to run.
+                    return Result.success();
                 }
                 if (delivery!=1) return Result.retry();
                 synchronized (GoogleSyncPlugin.class) {
