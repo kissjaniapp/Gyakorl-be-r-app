@@ -401,8 +401,8 @@ function finish(completed=false){
   if(completed){completedHeats.add(fi);if(completedHeats.size===futams.length)queueGoogleCompetition();}
 }
 function pickF(){load(+$('fsel').value);finish()}
-function nextF(){load(fi+1);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render()}
-function back(){show('run');ph='eles';ri=EK-1;ci=names.length-1;render()}
+function nextF(){sensorReviewMode=false;sensorReviewOrigin=null;load(fi+1);ph=mode=='both'?'gyak':'eles';ri=0;ci=0;show('run');render()}
+function back(){sensorReviewMode=true;sensorReviewOrigin=null;show('run');ph='eles';ri=EK-1;ci=names.length-1;render()}
 function restart(){if(confirm('Új verseny kezdése? Az összes futam eredménye törlődik (ha nem mentetted).'))show('setup')}
 
 /* ---- JPEG ---- */
