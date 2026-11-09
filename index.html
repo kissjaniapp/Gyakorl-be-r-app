@@ -62,14 +62,6 @@ td{padding:7px 4px}tr:nth-child(even){background:rgba(255,255,255,.03)}
   <label style="margin-top:12px">Számolás</label>
   <div class="g2"><button class="m on" id="t-ido" onclick="setTime(true)">Pont + Idő</button><button class="m" id="t-pont" onclick="setTime(false)">Csak pont</button></div>
   <div class="row"><button class="p" onclick="start()">▶ Kezdés</button></div>
-  <details style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
-    <summary style="color:var(--ac2);font-weight:700;cursor:pointer">Kapcsolat beállításai</summary>
-    <label style="margin-top:10px">Google Apps Script webalkalmazás URL-je</label>
-    <input id="googleUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
-    <label style="margin-top:8px">Közös kulcs (ugyanaz, mint a Google Apps Scriptben)</label>
-    <input id="googleKey" type="password" placeholder="A Google Apps Scriptben beállított kulcs" autocomplete="off">
-    <div class="row"><button class="n" type="button" onclick="saveGoogleConfig()">Beállítások mentése</button></div>
-  </details>
 </div>
 
 <div id="run" class="hidden">
@@ -134,18 +126,6 @@ const GOOGLE_QUEUE_STORE='eredmenyBeiroGoogleQueueV1';
 const googleRead=(k,d='')=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
 const googleWrite=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){return false}};
 function initGoogleConfig(){
-  $('googleUrl').value=googleRead(GOOGLE_URL_STORE) || 'https://script.google.com/macros/s/AKfycbxdGqV7kMA_crnm7DABUSTFarmXddiX1m-paOouDoaNljwYgVA9wDRpJNsmkyZM65ntlg/exec';
-  $('googleKey').value=googleRead(GOOGLE_KEY_STORE);
-  drainGoogleQueue();
-}
-function saveGoogleConfig(){
-  const url=$('googleUrl').value.trim(),key=$('googleKey').value.trim();
-  if(url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test(url)){
-    alert('Ellenőrizd a címet: a Google Apps Script webalkalmazás /exec végpontját kell megadni.');return;
-  }
-  if(!googleWrite(GOOGLE_URL_STORE,url)||!googleWrite(GOOGLE_KEY_STORE,key)){
-    alert('A beállításokat nem sikerült elmenteni ezen az eszközön.');return;
-  }
   drainGoogleQueue();
 }
 function googleQueue(){try{return JSON.parse(googleRead(GOOGLE_QUEUE_STORE,'[]'))||[]}catch(e){return []}}
@@ -216,6 +196,8 @@ async function enqueueGoogleResult(url,key,payload){
 async function drainGoogleQueue(){
   if(googleDrainBusy)return;
   const url=googleRead(GOOGLE_URL_STORE),key=googleRead(GOOGLE_KEY_STORE);
+  // Leave any existing native configuration and queued jobs untouched if JS settings are unavailable.
+  if(!url||!key)return;
   googleDrainBusy=true;
   try{
     // Keep all native pending jobs pointed at the latest configured endpoint and key.
@@ -224,7 +206,6 @@ async function drainGoogleQueue(){
       const configured=await plugin.configure({url,secret:key});
       if(!configured || configured.ok!==true)throw new Error('configuration failed');
     }
-    if(!url||!key)return;
     while(true){
       const before=googleQueue(),payload=before[0];
       if(!payload)return;
