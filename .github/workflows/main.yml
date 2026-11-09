@@ -14,6 +14,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # Ellenorzes utan a Google titkokat nem irjuk a nyilvanos APK-ba.
       - name: Google kapcsolat titkainak ellenorzese
         shell: bash
         env:
