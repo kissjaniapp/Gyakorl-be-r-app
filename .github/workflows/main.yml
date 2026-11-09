@@ -38,6 +38,7 @@ jobs:
         run: |
           node test/android-timer.cjs
           node test/android-finish.cjs
+          node test/android-queue.cjs
           mkdir -p build-sensor-test
           javac -d build-sensor-test SensorResponseValidator.java test/SensorResponseValidatorTest.java
           java -cp build-sensor-test hu.eredmenytablazat.app.SensorResponseValidatorTest
