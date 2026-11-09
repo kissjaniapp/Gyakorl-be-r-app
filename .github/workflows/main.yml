@@ -14,8 +14,28 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Google kapcsolat titkainak ellenorzese
+        shell: bash
+        env:
+          GOOGLE_WEBAPP_URL: ${{ secrets.GOOGLE_WEBAPP_URL }}
+          GOOGLE_SHARED_KEY: ${{ secrets.GOOGLE_SHARED_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, urllib.parse
+          url = os.environ.get('GOOGLE_WEBAPP_URL', '')
+          key = os.environ.get('GOOGLE_SHARED_KEY', '')
+          p = urllib.parse.urlsplit(url)
+          if not url or not key:
+              print('::notice::A Google kapcsolat titkai még nincsenek beállítva.')
+          elif p.scheme != 'https' or p.hostname != 'script.google.com' or not p.path.startswith('/macros/s/') or not p.path.endswith('/exec'):
+              raise SystemExit('A Google webalkalmazás címének formátuma érvénytelen.')
+          else:
+              print('A Google kapcsolat titkai elérhetők.')
+          PY
       - name: www mappa elokeszitese
         run: mkdir -p www && cp index.html xlsx.full.min.js www/
+      - name: Android idomero teszt
+        run: node test/android-timer.cjs
       - run: npm install
       - run: npx cap add android
       - name: Gradle letoltesi ido beallitasa
@@ -33,6 +53,8 @@ jobs:
           from pathlib import Path
           manifest = Path('android/app/src/main/AndroidManifest.xml')
           text = manifest.read_text(encoding='utf-8')
+          if 'android.permission.ACCESS_NETWORK_STATE' not in text:
+              text = text.replace('<application', '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application', 1)
           if '<application' not in text:
               raise RuntimeError('Az Android application elem nem talalhato')
           text = text.replace('<application', '<application android:networkSecurityConfig="@xml/network_security_config"', 1)
@@ -52,7 +74,7 @@ jobs:
       - name: Mento kod beepitese
         run: |
           D=$(dirname $(find android/app/src/main/java -name MainActivity.java))
-          cp MainActivity.java JpegSaverPlugin.java GoogleSyncPlugin.java "$D/"
+          cp MainActivity.java JpegSaverPlugin.java GoogleSyncPlugin.java ArduinoSensorPlugin.java "$D/"
       - name: Ikon es nev
         run: |
           python3 -c "import PIL" 2>/dev/null || pip install --break-system-packages pillow

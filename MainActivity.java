@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(JpegSaverPlugin.class);
         registerPlugin(GoogleSyncPlugin.class);
+        registerPlugin(ArduinoSensorPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
